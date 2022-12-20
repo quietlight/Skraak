@@ -24,16 +24,16 @@ using Glob, CSV, DataFrames, DelimitedFiles
 """
 dataset()
 
-This function takes a csv file in a folder plus
-a label string, and generates a dataset.
+This function takes a csv file in a folder 
+and generates a dataset with label  K-Set.
 It saves  wav files to /media/david/72CADE2ECADDEDFB/DataSet/$label/  
-and annotation files to a reperate directory as raven files. (it would be 
+and annotation files to a seperate directory as raven files. (it would be 
 better for me to just build the csv direct, soon.)
 
 using Glob, CSV, DataFrames, DelimitedFiles
 """
 
-function dataset(label::String)
+function dataset()
     raw_data = glob("*.csv")
 
     if length(raw_data) == 1
@@ -43,13 +43,14 @@ function dataset(label::String)
         return message
     end
 
-    if !(label in levels(data_frame.species))
-        message = pwd() * " $label not present"
+    if !("K-Set" in levels(data_frame.species))
+        message = pwd() * " K-Set not present"
         return message
     else
+
         species_grouped_frames = groupby(data_frame, :species)
         # Beware this comma!!
-        kset = species_grouped_frames[(species = :"$label",)]
+        kset = species_grouped_frames[(species = :"K-Set",)]
         path_sets = groupby(kset, :Path)
 
         for file_path in eachindex(path_sets)
@@ -82,17 +83,16 @@ function dataset(label::String)
                         "",
                     ],
                 )
-            end
 
+            end
             p = split(f[1, :Path], ".")
             if length(p) < 3
-                # Julia does not like | in file names, but all my csv files as 
-                # already built with | in file path.
-                # But I need q[1] later when I save the wav anyway, so its ok
+                # Julia does not like | in file names, but all my csv files as already built with | in file path.
+                # But I need q[1], q[2] later when I save the wav anyway, so its ok
                 q = split(p[end-1], "|")
                 r = string(q[1], "_", q[2], "_", q[3])
                 output_file =
-                    "/media/david/72CADE2ECADDEDFB/DataSet/$label-Annotations/" *
+                    "/media/david/72CADE2ECADDEDFB/DataSet/K-Set_AnnoTables/" *
                     r *
                     ".Table.1.selections.txt"
             else
@@ -103,7 +103,7 @@ function dataset(label::String)
             end
             src = chop(f[1, :File_Name], tail = 5)
             dst =
-                "/media/david/72CADE2ECADDEDFB/DataSet/$label/" *
+                "/media/david/72CADE2ECADDEDFB/DataSet/K-Set/" *
                 q[1] *
                 "_" *
                 q[2] *
@@ -113,6 +113,8 @@ function dataset(label::String)
             print(".")
         end
     end
+
+
 
 end
 
