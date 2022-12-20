@@ -20,17 +20,21 @@ for folder in folders:
 	os.chdir(folder)
 	print(folder, ' start: ', datetime.now())
 	field_recordings = glob('./*.WAV')	
-	scores, preds, labels = model.predict(
+	scores, preds, unsafe = model.predict(
 		field_recordings, 
 		binary_preds = 'single_target', 
 		overlap_fraction = 0.5, 
-		batch_size =  32, 
+		batch_size =  64, 
 		num_workers = 12)
 	scores.to_csv("scores.csv")
 	preds.to_csv("preds.csv")
-	file = open("labels.txt","w")
-	file.write(labels)
-	file.close()
+	if len(unsafe) > 0:
+		with open('unsafe.txt', 'w') as file:
+    		for item in unsafe:
+        		file.write("%s\n" % item)
+
+    print('Done')
 	os.chdir('../..')
 	print(folder, ' done: ', datetime.now())
+	print()
 	print()
