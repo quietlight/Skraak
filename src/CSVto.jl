@@ -4,31 +4,37 @@ module CSVto
 
 """
 CSVto submodules:
-dataset
+    dataset
+    airtable
 
-# cd to the working directory, to run:
-julia
-using Glob, Skraak
-x = glob("*/2022-10-08")
-for i in x
-cd(i)
-Skraak.CSVto.dataset()
-cd("/path/to/working/directory")
-end
+
 """
 
-export dataset
+export dataset, airtable
 
 using Glob, CSV, DataFrames, DelimitedFiles
 
 """
 dataset()
 
-This function takes a csv file in a folder 
-and generates a dataset with label  K-Set.
+This function takes a csv file in a folder and generates a dataset 
+with label K-Set. 
+
+It works on CSV's from hand labelled AvianNZ style JSON.
+
 It saves  wav files to /media/david/72CADE2ECADDEDFB/DataSet/$label/  
 and annotation files to a seperate directory as raven files. (it would be 
 better for me to just build the csv direct, soon.)
+
+    # cd to the working directory, to run:
+    julia
+    using Glob, Skraak
+    x = glob("*/2022-10-08")
+    for i in x
+    cd(i)
+    Skraak.CSVto.dataset()
+    cd("/path/to/working/directory")
+    end
 
 using Glob, CSV, DataFrames, DelimitedFiles
 """
@@ -116,6 +122,22 @@ function dataset()
 
 
 
+end
+
+"""
+airtable()
+
+This function takes an opensoundscape preds.csv file in a folder and generates 
+file names, wav's, spectrograms etc to be uploaded to airtable for review.
+
+It saves  wav and png files to /home/david/Upload/ 
+It saves a .csv where it is
+
+using Glob, CSV, DataFrames, DelimitedFiles
+"""
+
+function airtable()
+    return true
 end
 
 end  # module

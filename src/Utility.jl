@@ -1,4 +1,17 @@
-# UTCtoNZDT.jl
+# Utility.jl
+
+module Utility
+
+"""
+Utility submodules:
+	UTCtoNZDT
+	day_or_night
+
+"""
+
+export UTCtoNZDT, day_or_night
+
+using Dates
 
 """
 Takes a list of moth files and rewrites UTC filenames to NZDT, because since 
@@ -14,9 +27,8 @@ for folder in a
     cd("/media/david/Pomona-2")
 end
 
-"""
-
 using Dates
+"""
 
 function UTCtoNZDT(files::Vector{String})
 	fix_extension_of_files = []
@@ -52,5 +64,9 @@ function UTCtoNZDT(files::Vector{String})
 	print("Tidy\n")
 end
 
+function day_or_night()
+	return true
+end
 
+end # module
 

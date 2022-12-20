@@ -12,7 +12,7 @@ using Glob, Skraak
 x = glob("*/2022-10-08")
 for i in x
 cd(i)
-Skraak.JSONto.airtable() or Skraak.JSONto.kiwi_csv() or Skraak.JSONto.dataset()
+Skraak.JSONto.airtable() or Skraak.JSONto.kiwi_csv()
 cd("/path/to/working/directory")
 end
 """
@@ -24,11 +24,17 @@ using CSV, DataFrames, Dates, DelimitedFiles, DSP, Glob, JSON3, Plots, WAV, XMLD
 """
 airtable()
 
-This function takes raw AviaNZ labels in a folder and generates a wav, png and a csv file.
+This function takes raw AviaNZ labels in a folder and generates 
+a wav, png and a csv file.
+
 I upload to Airtable to sift through false positives.
+
 It is looking for species=Kiwi (Tokoeka Fiordland)
+
 output folder for wav and png is  "/home/david/Upload/"
+
 csv file assumes I am uploading to aws
+
 csv is written in the same folder as the JSON .data files
 
 using Dates, DelimitedFiles, DSP, Glob, JSON3, Plots, WAV
@@ -148,10 +154,14 @@ end
 """
 kiwi_csv()
 
-This function takes hand labeled AviaNZ JSON and outputs a csv to  be used by pomona.jl et al
-It is in the same place the wav files are, usually a removeable drive but could be on the Linux
-beasts internal drive.
+This function takes hand labeled AviaNZ JSON and outputs a csv to  
+be used by pomona.jl et al
+
+It is in the same place the wav files are, usually a removeable drive 
+but could be on the Linux beasts internal drive.
+
 The csv must be in MacLabels for pomona.jl to find it.
+
 This function needs the raw wav files, hand labelled .data files and a gpx.
 
 using Dates, DelimitedFiles, Glob, JSON3, WAV, XMLDict
@@ -290,9 +300,13 @@ end
 
 """
 mutate_call_type()
-This function mutates my K-XX labels to M ,F, MF, ? and writes a .backup file with the old label
-I used this to train on AviaNZ but dont need it anymore, it's here just in case.
-I can do everything I need in a dataframe now that I  am training with opensoundcloud 
+
+This function mutates my K-XX labels to M ,F, MF, ? and writes a .backup 
+file with the old label.
+
+I used this to train on AviaNZ but dont need it anymore, it's here just 
+in case. I can do everything I need in a dataframe now that I  am 
+training with opensoundcloud 
 
 using Dates, DelimitedFiles, Glob, JSON3, WAV, XMLDict (I think)
 It was part of the kiwi_csv() function in the old days
