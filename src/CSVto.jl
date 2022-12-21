@@ -127,16 +127,17 @@ end
 """
 airtable()
 
-This function takes an opensoundscape preds.csv file in a folder and generates 
+This function takes a vector of opensoundscape preds.csv files and generates 
 file names, wav's, spectrograms etc to be uploaded to airtable for review.
 
 It saves  wav and png files to /home/david/Upload/ 
-It saves a .csv where it is
+It saves a kiwi_data.csv in the same place as the preds.csv
+aggregate kiwi_data.csv's later for airtable upload
 
 using Glob, CSV, DataFrames, DelimitedFiles
 """
 
-function airtable()
+function airtable(files::Vector{String})
     return true
 end
 
