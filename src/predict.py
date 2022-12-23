@@ -19,6 +19,7 @@ folders =  glob('./*/2022-12-17/')
 for folder in folders:
     os.chdir(folder)
     print(folder, ' start: ', datetime.now())
+    # Beware, secretary island files are .wav
     field_recordings = glob('./*.WAV')	
     scores, preds, unsafe = model.predict(
             field_recordings, 

@@ -12,7 +12,7 @@ CSVto submodules:
 
 export dataset, airtable
 
-using Glob, CSV, DataFrames, DelimitedFiles
+using Glob, CSV, DataFrames, Dates, DelimitedFiles
 
 """
 dataset()
@@ -127,18 +127,126 @@ end
 """
 airtable()
 
-This function takes a vector of opensoundscape preds.csv files and generates 
+This function takes a preds.csv files and generates 
 file names, wav's, spectrograms etc to be uploaded to airtable for review.
+It returns a dataframe to be piped into airtable_buckets()
+it calls night() therefore night() must be available.
 
+It should be run from Pomona-1/ or Pomona-2/
 It saves  wav and png files to /home/david/Upload/ 
-It saves a kiwi_data.csv in the same place as the preds.csv
-aggregate kiwi_data.csv's later for airtable upload
+It returns a dataframe to be piped into airtable_buckets()
 
-using Glob, CSV, DataFrames, DelimitedFiles
+using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
 
-function airtable(files::Vector{String})
-    return true
+function airtable(file::String)
+    # Assumes function run from Pomona-1 or Pomona-2
+    location, trip_date, _ = split(file, "/")
+    data = DataFrame(CSV.File(file))
+    @transform!(data, @byrow :DateTime = DateTime(chop(:file, head=2, tail=4), dateformat"yyyymmdd_HHMMSS"))
+    gdf = groupby(data, :present)
+    pres = gdf[(present=1,)]
+    pres_night = @subset(pres, @byrow night(:DateTime, dict)) #throw away nights
+    #sort!(pres_night)
+    files = groupby(pres_night, :file)
+    #airtable = DataFrame(a = Any[], b = Any[])
+    airtable = DataFrame(FileName=String[], Image=String[], Audio=String[], StartTime=DateTime[], Length=Float64[], Location=String[], Trip=String[])
+    for (k,v) in pairs(files)
+        file_start_time = v.DateTime[1]
+        file_name = chop(v.file[1], head=2, tail=4)
+        x = v[!, :start_time]
+        sort!(x)
+        s = []
+        t = []
+        for time in x
+            if length(t) == 0
+                push!(t, time)
+            elseif time - last(t) <= 15.0 
+                push!(t, time)
+            else
+                push!(s, copy(t))
+                deleteat!(t, 1:length(t))
+                push!(t, time)
+            end
+        end
+        push!(s, copy(t))
+        deleteat!(t, 1:length(t))
+        detections=filter(x -> length(x) > 1, s)
+        #println(file_name, file_start_time, detections)
+        if length(detections) > 0
+            #load file
+            signal, freq = wavread("$location/$trip_date/$file_name.WAV")
+            for detection in detections
+                #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
+                (first(detection)-2)*freq >= 0 ? st = (first(detection)-2)*freq : st = 1
+                (last(detection)+7)*freq <= length(signal) ? en = (last(detection)+7)*freq : en = length(signal)
+                sample = signal[Int(st):Int(en)]
+                name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
+                outfile = "/home/david/Upload/$name"
+                #write a wav file
+                wavwrite(sample, "$outfile.wav", Fs = Int(freq))
+                #spectrogram
+                n = 400
+                fs = convert(Int, freq)
+                S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
+                heatmap(
+                    S.time,
+                    S.freq,
+                    pow2db.(S.power),
+                    xguide = "Time [s]",
+                    yguide = "Frequency [Hz]",
+                )
+                savefig(outfile)
+                #push to to airtable df
+                push!(airtable, [name, "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.png", "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.wav", file_start_time, (en-st)/freq, location, trip_date])
+                
+            end
+        end
+        print(".")
+        #println(k, v)
+    end
+    return airtable
+end
+
+"""
+Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
+"""
+function airtable_buckets(dataframe)
+	e=floor(nrow(dataframe)/10)
+	f=round((nrow(dataframe)/10-e)*10)
+	g=[]
+	for i in 1:e
+		for h in 1:10
+			push!(g, i)
+		end
+	end
+	for j in 1:f
+		push!(g, e+1)
+	end
+	dataframe.Bin = g
+    grouped_dataframe = groupby(dataframe, :Bin)
+    for group in grouped_dataframe
+        index = randstring()
+        io = open("/home/david/Airtable/$index.json", "w")
+        write(io, """{"records":[""")
+        for row in eachrow(group)
+            write(io, """{"fields":{""")
+            write(io, """"Audio":[{"url": "$(row.Audio)"}],""")
+            write(io, """"Trip":"$(row.Trip)",""")
+            write(io, """"File Name":"$(row."FileName")",""")
+            write(io, """"Image":[{"url":"$(row.Image)"}],""")
+            write(io, """"Length (seconds)":$(row.Length),""")
+            write(io, """"Start Time": "$(row."StartTime")",""")
+            write(io, """"Location": "$(row.Location)" """)
+            write(io, """}}""")
+            if row != last(group)
+                write(io, """,""")
+            end
+        end
+        write(io, "]}")
+        close(io)    
+    end;
+
 end
 
 end  # module
