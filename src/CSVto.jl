@@ -136,6 +136,23 @@ It should be run from Pomona-1/ or Pomona-2/
 It saves  wav and png files to /home/david/Upload/ 
 It returns a dataframe to be piped into airtable_buckets()
 
+for file in predictions
+    airtable_buckets(airtable(file))
+end
+
+a=glob("*.json")
+b=collect(Iterators.partition(a, 85))
+for (index, value) in enumerate(b)
+    mkpath("$index")
+    for item in value
+        mv(item, "$index/$item")
+    end
+    println("$index")
+    println("$value\n\n")
+end
+
+See simplenote for upload script, remember to cd into the numbered folder
+
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
 
@@ -209,7 +226,10 @@ function airtable(file::String)
 end
 
 """
+airtable_buckets(dataframe)
+
 Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
+Intended to work with airtable() in a chain
 """
 function airtable_buckets(dataframe)
 	e=floor(nrow(dataframe)/10)
