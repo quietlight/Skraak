@@ -71,11 +71,12 @@ end
 twilight_tuple_local_time(dt::Date)
 
 Takes a date and returns a tuple with local time twilight times. Use to make a Dataframe then csv.
+Queries api.sunrise-sunset.org
 
 Use like this:
 
 df = DataFrame(Date=[], Dawn=[], Dusk=[])
-dr = Dates.Date(2021,10,28):Dates.Day(1):Dates.Date(2022,12,31)
+dr = Dates.Date(2023,01,01):Dates.Day(1):Dates.Date(2024,12,31)
 for day in dr
 	q = twilight_tuple_local_time(day)
 	isempty(q) ? println("fail $day") : push!(df, q)
