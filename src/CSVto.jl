@@ -226,15 +226,10 @@ function airtable(file::String)
 end
 
 """
-<<<<<<< Updated upstream
 airtable_buckets(dataframe)
 
 Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
 Intended to work with airtable() in a chain
-=======
-Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, 
-and returns json in ~/Airtable to be uploaded to airtable.
->>>>>>> Stashed changes
 """
 function airtable_buckets(dataframe)
 	e=floor(nrow(dataframe)/10)
@@ -273,5 +268,61 @@ function airtable_buckets(dataframe)
     end;
 
 end
+
+"""
+Json(csv_file::String)
+
+Takes a csv from finder labelling step and writes json for consumtion through AviaNZ labelling GUI.
+
+Note, if single labels are quoted csv wont read, quote multi labels only, or open with numbers then export, maybe use tsv instead of csv.
+Not must be a lonely label, on a line by itself, not mixed in with other labels, watch out for ", sanitise using find and replace in numbers.
+It's going to write files in folders, run in the correct Tagging subdirectory
+Assumes a file duration of 895 seconds.
+
+using CSV, DataFrames, DataFramesMeta, Dates, JSONTables, Glob, Plots, Random
+"""
+function Json(csv_file::String)
+    K = DataFrame(CSV.File(csv_file))
+    #subset(K, :label => ByRow(label -> label != "Not")) the one below is better, it ignores white space and other labels.
+    subset!(K, :label => ByRow(label -> occursin(label, "Not")))
+    sort!(K, :file)
+    @transform!(K, @byrow :File = (split(:file, "-"))[5] )
+    @transform!(K, @byrow :S = (split(:file, "-"))[6] )
+    @transform!(K, @byrow :E = chop((split(:file, "-"))[7], tail=4) )
+    @transform!(K, @byrow :Path = (split(:file, "-"))[1] * "/" * (split(:file, "-"))[2] * "-" * (split(:file, "-"))[3] * "-" *  (split(:file, "-"))[4])
+    gdf = groupby(K, :Path)
+    #p=sort((combine(gdf, nrow)), :nrow) #This gives a nice list of nrows per recorder location 
+    #paths=p.Path
+    paths=levels(K.Path) # more efficient than above unless I am looking
+    mkpath.(paths)
+    #
+    for loc in gdf
+        B = groupby(loc, :File)
+        for group in B
+            io = open("$(group.Path[1])/$(group.File[1]).WAV.data", "w")
+            write(io, """[ """)
+            write(io, """{"Reviewer":"D", "Operator":"Finder", "Duration":895},""")
+            for row in eachrow(group)
+                write(io, """[$(row.S), $(row.E), 0, 8000, """)
+                    x=split(row.label, ",")
+                    for label in x
+                        write(io, """[{"species":"$label", "filter": "OSS-Kiwi", "certainty":99}]""") 
+                        if label != last(x) 
+                        write(io, """,""")
+                        end
+                    end  
+                write(io, """]""")
+                if row != last(group) 
+                    write(io, """,""")
+                end
+            end
+            write(io, """ ]""")
+            close(io)
+        end
+    end
+    #
+
+end
+
 
 end  # module
