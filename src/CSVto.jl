@@ -195,8 +195,8 @@ function airtable(file::String)
             signal, freq = wavread("$location/$trip_date/$file_name.WAV")
             for detection in detections
                 #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
-                (first(detection)-2)*freq >= 0 ? st = (first(detection)-2)*freq : st = 1
-                (last(detection)+7)*freq <= length(signal) ? en = (last(detection)+7)*freq : en = length(signal)
+                (first(detection)-0.5)*freq >= 0 ? st = (first(detection)-0.5)*freq : st = 1
+                (last(detection)+5.5)*freq <= length(signal) ? en = (last(detection)+5.5)*freq : en = length(signal)
                 sample = signal[Int(st):Int(en)]
                 name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
                 outfile = "/home/david/Upload/$name"
@@ -226,10 +226,15 @@ function airtable(file::String)
 end
 
 """
+<<<<<<< Updated upstream
 airtable_buckets(dataframe)
 
 Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
 Intended to work with airtable() in a chain
+=======
+Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, 
+and returns json in ~/Airtable to be uploaded to airtable.
+>>>>>>> Stashed changes
 """
 function airtable_buckets(dataframe)
 	e=floor(nrow(dataframe)/10)
