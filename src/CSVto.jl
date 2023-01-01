@@ -6,13 +6,14 @@ module CSVto
 CSVto submodules:
     dataset
     airtable
-
+    airtable_buckets
+    json
 
 """
 
-export dataset, airtable
+export airtable, airtable_buckets, dataset, json
 
-using Glob, CSV, DataFrames, Dates, DelimitedFiles
+using Glob, CSV, DataFrames, DataFramesMeta, Dates, DelimitedFiles, DSP, Plots, Random, WAV
 
 """
 dataset()
@@ -270,21 +271,22 @@ function airtable_buckets(dataframe)
 end
 
 """
-Json(csv_file::String)
+json(csv_file::String)
 
-Takes a csv from finder labelling step and writes json for consumtion through AviaNZ labelling GUI.
+Takes a csv from Finder labelling step and writes json for consumtion through AviaNZ labelling GUI.
 
 Note, if single labels are quoted csv wont read, quote multi labels only, or open with numbers then export, maybe use tsv instead of csv.
 Not must be a lonely label, on a line by itself, not mixed in with other labels, watch out for ", sanitise using find and replace in numbers.
 It's going to write files in folders, run in the correct Tagging subdirectory
 Assumes a file duration of 895 seconds.
+Writes evey label to file except "Not".
 
-using CSV, DataFrames, DataFramesMeta, Dates, JSONTables, Glob, Plots, Random
+using CSV, DataFrames, DataFramesMeta
 """
-function Json(csv_file::String)
+function json(csv_file::String)
     K = DataFrame(CSV.File(csv_file))
     #subset(K, :label => ByRow(label -> label != "Not")) the one below is better, it ignores white space and other labels.
-    subset!(K, :label => ByRow(label -> occursin(label, "Not")))
+    subset!(K, :label => ByRow(label -> !occursin(label, "Not")))
     sort!(K, :file)
     @transform!(K, @byrow :File = (split(:file, "-"))[5] )
     @transform!(K, @byrow :S = (split(:file, "-"))[6] )
@@ -306,7 +308,8 @@ function Json(csv_file::String)
                 write(io, """[$(row.S), $(row.E), 0, 8000, """)
                     x=split(row.label, ",")
                     for label in x
-                        write(io, """[{"species":"$label", "filter": "OSS-Kiwi", "certainty":99}]""") 
+                        l=filter(x -> !isspace(x), label)
+                        write(io, """[{"species":"$l", "calltype":"", "filter": "Opensoundscape-Kiwi", "certainty":99}]""") 
                         if label != last(x) 
                         write(io, """,""")
                         end
@@ -318,10 +321,11 @@ function Json(csv_file::String)
             end
             write(io, """ ]""")
             close(io)
+            print(".")
         end
     end
     #
-
+    println("\ndone")
 end
 
 

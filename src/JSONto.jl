@@ -17,7 +17,7 @@ cd("/path/to/working/directory")
 end
 """
 
-export airtable, kiwi_csv
+export airtable, kiwi_csv, mutate_call_type
 
 using CSV, DataFrames, Dates, DelimitedFiles, DSP, Glob, JSON3, Plots, WAV, XMLDict
 
