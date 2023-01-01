@@ -9,9 +9,9 @@ Utility submodules:
 
 """
 
-export UTCtoNZDT, night
+export construct_dawn_dusk_dict, night, twilight_tuple_local_time, UTCtoNZDT
 
-using Dates
+using CSV, DataFrames, Dates, HTTP, JSON, TimeZones
 
 """
 UTCtoNZDT(files::Vector{String})
@@ -105,9 +105,12 @@ function twilight_tuple_local_time(dt::Date)
 end
 
 """
+Takes dawn dusk.csv and returns a dict to be consumeed by night().
 ~/dawn_dusk.csv 
 At present it goes from first C05 recording 28/10/21 to the end of 2022
 dict = construct_dawn_dusk_dict("/home/david/dawn_dusk.csv")
+
+using CSV, DataFrames
 """
 function construct_dawn_dusk_dict(file::String)::Dict{Date, Tuple{DateTime, DateTime}}
 	sun = DataFrame(CSV.File(file))
@@ -120,6 +123,7 @@ end
 night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
 
 Returns true if time is at night, ie between civil twilights, dusk to dawn.
+Consumes dict from construct_dawn_dusk_dict
 
 # Construct a date to test function
 # g=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
