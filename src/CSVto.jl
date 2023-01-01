@@ -29,7 +29,8 @@ See simplenote for upload script, remember to cd into the numbered folder
 
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
-#=This stuff throws an error when in docstring above:
+#=
+This stuff throws an error when in docstring above:
 for file in predictions
     airtable_buckets(airtable(file))
 end
@@ -49,17 +50,29 @@ function airtable(file::String)
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(file, "/")
     data = DataFrame(CSV.File(file))
-    @transform!(data, @byrow :DateTime = DateTime(chop(:file, head=2, tail=4), dateformat"yyyymmdd_HHMMSS"))
+    @transform!(
+        data,
+        @byrow :DateTime =
+            DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
+    )
     gdf = groupby(data, :present)
-    pres = gdf[(present=1,)]
+    pres = gdf[(present = 1,)]
     pres_night = @subset(pres, @byrow night(:DateTime, dict)) #throw away nights
     #sort!(pres_night)
     files = groupby(pres_night, :file)
     #airtable = DataFrame(a = Any[], b = Any[])
-    airtable = DataFrame(FileName=String[], Image=String[], Audio=String[], StartTime=DateTime[], Length=Float64[], Location=String[], Trip=String[])
-    for (k,v) in pairs(files)
+    airtable = DataFrame(
+        FileName = String[],
+        Image = String[],
+        Audio = String[],
+        StartTime = DateTime[],
+        Length = Float64[],
+        Location = String[],
+        Trip = String[],
+    )
+    for (k, v) in pairs(files)
         file_start_time = v.DateTime[1]
-        file_name = chop(v.file[1], head=2, tail=4)
+        file_name = chop(v.file[1], head = 2, tail = 4)
         x = v[!, :start_time]
         sort!(x)
         s = []
@@ -67,7 +80,7 @@ function airtable(file::String)
         for time in x
             if length(t) == 0
                 push!(t, time)
-            elseif time - last(t) <= 15.0 
+            elseif time - last(t) <= 15.0
                 push!(t, time)
             else
                 push!(s, copy(t))
@@ -77,15 +90,17 @@ function airtable(file::String)
         end
         push!(s, copy(t))
         deleteat!(t, 1:length(t))
-        detections=filter(x -> length(x) > 1, s)
+        detections = filter(x -> length(x) > 1, s)
         #println(file_name, file_start_time, detections)
         if length(detections) > 0
             #load file
             signal, freq = wavread("$location/$trip_date/$file_name.WAV")
             for detection in detections
                 #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
-                (first(detection)-0.5)*freq >= 0 ? st = (first(detection)-0.5)*freq : st = 1
-                (last(detection)+5.5)*freq <= length(signal) ? en = (last(detection)+5.5)*freq : en = length(signal)
+                (first(detection) - 0.5) * freq >= 0 ?
+                st = (first(detection) - 0.5) * freq : st = 1
+                (last(detection) + 5.5) * freq <= length(signal) ?
+                en = (last(detection) + 5.5) * freq : en = length(signal)
                 sample = signal[Int(st):Int(en)]
                 name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
                 outfile = "/home/david/Upload/$name"
@@ -104,8 +119,18 @@ function airtable(file::String)
                 )
                 savefig(outfile)
                 #push to to airtable df
-                push!(airtable, [name, "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.png", "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.wav", file_start_time, (en-st)/freq, location, trip_date])
-                
+                push!(
+                    airtable,
+                    [
+                        name,
+                        "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.png",
+                        "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.wav",
+                        file_start_time,
+                        (en - st) / freq,
+                        location,
+                        trip_date,
+                    ],
+                )
             end
         end
         print(".")
@@ -120,17 +145,17 @@ airtable_buckets(dataframe)
 Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
 Intended to work with airtable() in a chain
 """
-function airtable_buckets(dataframe) 
-    e=floor(nrow(dataframe)/10)
-    f=round((nrow(dataframe)/10-e)*10)
-    g=[]
+function airtable_buckets(dataframe)
+    e = floor(nrow(dataframe) / 10)
+    f = round((nrow(dataframe) / 10 - e) * 10)
+    g = []
     for i in 1:e
         for h in 1:10
             push!(g, i)
         end
     end
     for j in 1:f
-        push!(g, e+1)
+        push!(g, e + 1)
     end
     dataframe.Bin = g
     grouped_dataframe = groupby(dataframe, :Bin)
@@ -153,9 +178,8 @@ function airtable_buckets(dataframe)
             end
         end
         write(io, "]}")
-        close(io)    
-    end;
-
+        close(io)
+    end
 end
 
 """
@@ -197,7 +221,6 @@ function dataset()
         message = pwd() * " K-Set not present"
         return message
     else
-
         species_grouped_frames = groupby(data_frame, :species)
         # Beware this comma!!
         kset = species_grouped_frames[(species = :"K-Set",)]
@@ -233,7 +256,6 @@ function dataset()
                         "",
                     ],
                 )
-
             end
             p = split(f[1, :Path], ".")
             if length(p) < 3
@@ -284,14 +306,24 @@ function json(csv_file::String)
     #subset(K, :label => ByRow(label -> label != "Not")) the one below is better, it ignores white space and other labels.
     subset!(K, :label => ByRow(label -> !occursin(label, "Not")))
     sort!(K, :file)
-    @transform!(K, @byrow :File = (split(:file, "-"))[5] )
-    @transform!(K, @byrow :S = (split(:file, "-"))[6] )
-    @transform!(K, @byrow :E = chop((split(:file, "-"))[7], tail=4) )
-    @transform!(K, @byrow :Path = (split(:file, "-"))[1] * "/" * (split(:file, "-"))[2] * "-" * (split(:file, "-"))[3] * "-" *  (split(:file, "-"))[4])
+    @transform!(K, @byrow :File = (split(:file, "-"))[5])
+    @transform!(K, @byrow :S = (split(:file, "-"))[6])
+    @transform!(K, @byrow :E = chop((split(:file, "-"))[7], tail = 4))
+    @transform!(
+        K,
+        @byrow :Path =
+            (split(:file, "-"))[1] *
+            "/" *
+            (split(:file, "-"))[2] *
+            "-" *
+            (split(:file, "-"))[3] *
+            "-" *
+            (split(:file, "-"))[4]
+    )
     gdf = groupby(K, :Path)
     #p=sort((combine(gdf, nrow)), :nrow) #This gives a nice list of nrows per recorder location 
     #paths=p.Path
-    paths=levels(K.Path) # more efficient than above unless I am looking
+    paths = levels(K.Path) # more efficient than above unless I am looking
     mkpath.(paths)
     #
     for loc in gdf
@@ -302,16 +334,19 @@ function json(csv_file::String)
             write(io, """{"Reviewer":"D", "Operator":"Finder", "Duration":895},""")
             for row in eachrow(group)
                 write(io, """[$(row.S), $(row.E), 0, 8000, """)
-                    x=split(row.label, ",")
-                    for label in x
-                        l=filter(x -> !isspace(x), label)
-                        write(io, """[{"species":"$l", "calltype":"", "filter": "Opensoundscape-Kiwi", "certainty":99}]""") 
-                        if label != last(x) 
+                x = split(row.label, ",")
+                for label in x
+                    l = filter(x -> !isspace(x), label)
+                    write(
+                        io,
+                        """[{"species":"$l", "calltype":"", "filter": "Opensoundscape-Kiwi", "certainty":99}]""",
+                    )
+                    if label != last(x)
                         write(io, """,""")
-                        end
-                    end  
+                    end
+                end
                 write(io, """]""")
-                if row != last(group) 
+                if row != last(group)
                     write(io, """,""")
                 end
             end

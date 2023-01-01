@@ -1,0 +1,5 @@
+always_for_in = true
+remove_extra_newlines = true
+format_docstrings = true
+verbose = true
+format_markdown = true

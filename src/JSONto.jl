@@ -66,7 +66,6 @@ function airtable()
             file = chop(f, tail = 5)
             signal, freq = wavread(file)
             for h in eachindex(dict[2:end])
-
                 for i in eachindex(dict[h+1][5])
                     if dict[h+1][5][i][:species] == "Kiwi (Tokoeka Fiordland)"
                         c_type = get(dict[(h+1)][5][i], :calltype, missing)
@@ -126,10 +125,8 @@ function airtable()
                         ]
                         push!(data, line)
                     end
-
                 end
             end
-
         end
     end
 
@@ -147,9 +144,7 @@ function airtable()
     end
 
     println("\n\n", "Done", "\n")
-
 end
-
 
 """
 kiwi_csv()
@@ -244,7 +239,6 @@ function kiwi_csv()
             nt = get(dict[1], "noiseTypes", [])
             nl = get(dict[1], "noiseLevel", missing)
             for h in eachindex(dict[2:end])
-
                 s = f[10:11] * ":" * f[12:13] * ":" * f[14:15]
                 t0 = Dates.Time(s, "H:M:S")
                 st = dict[(h+1)][1]
@@ -282,7 +276,6 @@ function kiwi_csv()
                     ]
                     push!(data, line)
                 end
-
             end
         end
     end
@@ -296,7 +289,6 @@ function kiwi_csv()
 
     println("\n\n", output_file, " written sucessfully", "\n")
 end
-
 
 """
 mutate_call_type()
@@ -321,7 +313,6 @@ function mutate_call_type()
         if length(dict) > 1
             for h in eachindex(dict[2:end])
                 for i in eachindex(dict[h+1][5])
-
                     if dict[h+1][5][i][:species] == "K-M"
                         dict[h+1][5][i][:calltype] = "M"
                     elseif dict[h+1][5][i][:species] == "K-F"
@@ -331,7 +322,6 @@ function mutate_call_type()
                     elseif dict[h+1][5][i][:species] == "K-?MF"
                         dict[h+1][5][i][:calltype] = "?"
                     end
-
                 end
             end
         end
@@ -344,7 +334,6 @@ function mutate_call_type()
         open(f, "w") do io
             JSON3.write(io, dict)
         end
-
     end
 end
 
