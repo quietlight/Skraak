@@ -5,13 +5,51 @@ module Utility
 """
 Utility submodules:
 	UTCtoNZDT
-	night
-
 """
 
-export construct_dawn_dusk_dict, night, twilight_tuple_local_time, UTCtoNZDT
+export twilight_tuple_local_time, UTCtoNZDT
 
 using CSV, DataFrames, Dates, HTTP, JSON, TimeZones
+
+
+"""
+twilight_tuple_local_time(dt::Date)
+
+Takes a date and returns a tuple with local time twilight times. Use to make a Dataframe then csv.
+Queries api.sunrise-sunset.org
+
+Use like this:
+
+df = DataFrame(Date=[], Dawn=[], Dusk=[])
+dr = Dates.Date(2023,01,01):Dates.Day(1):Dates.Date(2024,12,31)
+for day in dr
+    q = twilight_tuple_local_time(day)
+    isempty(q) ? println("fail $day") : push!(df, q)
+    sleep(5)
+end
+CSV.write("dawn_dusk.csv", df)
+
+using CSV, DataFrames, Dates, HTTP, JSON, TimeZones
+"""
+function twilight_tuple_local_time(dt::Date)
+    # C05 co-ordinates hard coded into function
+    resp1 = HTTP.get(
+        "https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$dt&formatted=0",
+    )
+    resp2 = String(resp1.body) |> JSON.Parser.parse
+    resp3 = get(resp2, "results", "missing")
+    dusk_utc = get(resp3, "civil_twilight_end", "missing")
+    dusk_utc_zoned = ZonedDateTime(dusk_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
+    dusk_local = astimezone(dusk_utc_zoned, tz"Pacific/Auckland")
+    dusk_string = Dates.format(dusk_local, "yyyy-mm-ddTHH:MM:SS")
+    dawn_utc = get(resp3, "civil_twilight_begin", "missing")
+    dawn_utc_zoned = ZonedDateTime(dawn_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
+    dawn_local = astimezone(dawn_utc_zoned, tz"Pacific/Auckland")
+    dawn_string = Dates.format(dawn_local, "yyyy-mm-ddTHH:MM:SS")
+    date = Dates.format(dt, "yyyy-mm-dd")
+    return (date, dawn_string, dusk_string)
+end
+
 
 """
 UTCtoNZDT(files::Vector{String})
@@ -31,7 +69,6 @@ end
 
 using Dates
 """
-
 function UTCtoNZDT(files::Vector{String})
     fix_extension_of_files = []
     for old_file in files
@@ -67,78 +104,5 @@ function UTCtoNZDT(files::Vector{String})
     print("Tidy\n")
 end
 
-"""
-twilight_tuple_local_time(dt::Date)
-
-Takes a date and returns a tuple with local time twilight times. Use to make a Dataframe then csv.
-Queries api.sunrise-sunset.org
-
-Use like this:
-
-df = DataFrame(Date=[], Dawn=[], Dusk=[])
-dr = Dates.Date(2023,01,01):Dates.Day(1):Dates.Date(2024,12,31)
-for day in dr
-	q = twilight_tuple_local_time(day)
-	isempty(q) ? println("fail $day") : push!(df, q)
-	sleep(5)
-end
-CSV.write("dawn_dusk.csv", df)
-
-using CSV, DataFrames, Dates, HTTP, JSON, TimeZones
-"""
-
-function twilight_tuple_local_time(dt::Date)
-    # C05 co-ordinates hard coded into function
-    resp1 = HTTP.get(
-        "https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$dt&formatted=0",
-    )
-    resp2 = String(resp1.body) |> JSON.Parser.parse
-    resp3 = get(resp2, "results", "missing")
-    dusk_utc = get(resp3, "civil_twilight_end", "missing")
-    dusk_utc_zoned = ZonedDateTime(dusk_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
-    dusk_local = astimezone(dusk_utc_zoned, tz"Pacific/Auckland")
-    dusk_string = Dates.format(dusk_local, "yyyy-mm-ddTHH:MM:SS")
-    dawn_utc = get(resp3, "civil_twilight_begin", "missing")
-    dawn_utc_zoned = ZonedDateTime(dawn_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
-    dawn_local = astimezone(dawn_utc_zoned, tz"Pacific/Auckland")
-    dawn_string = Dates.format(dawn_local, "yyyy-mm-ddTHH:MM:SS")
-    date = Dates.format(dt, "yyyy-mm-dd")
-    return (date, dawn_string, dusk_string)
-end
-
-"""
-Takes dawn dusk.csv and returns a dict to be consumeed by night().
-~/dawn_dusk.csv
-At present it goes from first C05 recording 28/10/21 to the end of 2022
-dict = construct_dawn_dusk_dict("/home/david/dawn_dusk.csv")
-
-using CSV, DataFrames
-"""
-function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
-    sun = DataFrame(CSV.File(file))
-    x = Tuple(zip(sun.Dawn, sun.Dusk))
-    y = Dict(zip(sun.Date, x))
-    return y
-end
-
-"""
-night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
-
-Returns true if time is at night, ie between civil twilights, dusk to dawn.
-Consumes dict from construct_dawn_dusk_dict
-
-# Construct a date to test function
-
-# g=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
-"""
-function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
-    dawn = dict[Date(call_time)][1]
-    dusk = dict[Date(call_time)][2]
-    if call_time <= dawn || call_time >= dusk
-        return true
-    else
-        return false
-    end
-end
 
 end # module

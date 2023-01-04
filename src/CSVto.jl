@@ -11,8 +11,7 @@ CSVto submodules:
 
 export airtable, airtable_buckets, dataset, json
 
-using Glob, CSV, DataFrames, DataFramesMeta, Dates, DelimitedFiles, DSP, Plots, Random, WAV
-
+using Glob, CSV, DataFrames, DataFramesMeta, Dates, DelimitedFiles, DSP, HTTP, JSON,Plots, Random, TimeZones, WAV
 """
 airtable()
 
@@ -21,31 +20,18 @@ file names, wav's, spectrograms etc to be uploaded to airtable for review.
 It returns a dataframe to be piped into airtable_buckets()
 it calls night() therefore night() must be available.
 
-It should be run from Pomona-1/ or Pomona-2/
+It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
 It saves  wav and png files to /home/david/Upload/ 
 It returns a dataframe to be piped into airtable_buckets()
+now saves a csv
 
-See simplenote for upload script, remember to cd into the numbered folder
+predictions = glob("path/to/preds*")
+for file in predictions
+    CSVto.airtable(file)
+end
 
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
-#=
-This stuff throws an error when in docstring above:
-for file in predictions
-    airtable_buckets(airtable(file))
-end
-
-a=glob("*.json")
-b=collect(Iterators.partition(a, 85))
-for (index, value) in enumerate(b)
-    mkpath("$index")
-    for item in value
-        mv(item, "$index/$item")
-    end
-    println("$index")
-    println("$value\n\n")
-end
-=#
 function airtable(file::String)
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(file, "/")
@@ -57,7 +43,7 @@ function airtable(file::String)
     )
     gdf = groupby(data, :present)
     pres = gdf[(present = 1,)]
-    pres_night = @subset(pres, @byrow night(:DateTime, dict)) #throw away nights
+    pres_night = @subset(pres, @byrow night(:DateTime, (construct_dawn_dusk_dict("/media/david/027-7561938/PomonaData/dawn_dusk.csv")) )) #throw away nights
     #sort!(pres_night)
     files = groupby(pres_night, :file)
     #airtable = DataFrame(a = Any[], b = Any[])
@@ -97,10 +83,8 @@ function airtable(file::String)
             signal, freq = wavread("$location/$trip_date/$file_name.WAV")
             for detection in detections
                 #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
-                (first(detection) - 0.5) * freq >= 0 ?
-                st = (first(detection) - 0.5) * freq : st = 1
-                (last(detection) + 5.5) * freq <= length(signal) ?
-                en = (last(detection) + 5.5) * freq : en = length(signal)
+                first(detection) > 0 ? st = first(detection) * freq : st = 1
+                (last(detection) + 5.0) * freq <= length(signal) ? en = (last(detection) + 5.0) * freq : en = length(signal)
                 sample = signal[Int(st):Int(en)]
                 name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
                 outfile = "/home/david/Upload/$name"
@@ -136,7 +120,10 @@ function airtable(file::String)
         print(".")
         #println(k, v)
     end
-    return airtable
+    # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my niw finder tagging workflow
+    CSV.write("$location/$trip_date/segments-$location-$(string(today()))", airtable)
+    println("\ndone $location/$trip_date \n") 
+    #return airtable (no longer needed as not using airtable anymore)
 end
 
 """
@@ -145,6 +132,24 @@ airtable_buckets(dataframe)
 Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
 Intended to work with airtable() in a chain
 """
+#=
+This stuff throws an error when in docstring above:
+
+#To divide json files into groups of 85 for upload to airtable
+a=glob("*.json")
+b=collect(Iterators.partition(a, 85))
+for (index, value) in enumerate(b)
+    mkpath("$index")
+    for item in value
+        mv(item, "$index/$item")
+    end
+    println("$index")
+    println("$value\n\n")
+end
+
+
+See simplenote for upload script, remember to cd into the numbered folder
+=#
 function airtable_buckets(dataframe)
     e = floor(nrow(dataframe) / 10)
     f = round((nrow(dataframe) / 10 - e) * 10)
@@ -300,7 +305,6 @@ Writes evey label to file except "Not".
 
 using CSV, DataFrames, DataFramesMeta
 """
-
 function json(csv_file::String)
     K = DataFrame(CSV.File(csv_file))
     #subset(K, :label => ByRow(label -> label != "Not")) the one below is better, it ignores white space and other labels.
@@ -359,4 +363,39 @@ function json(csv_file::String)
     println("\ndone")
 end
 
-end  # module
+"""
+Takes dawn dusk.csv and returns a dict to be consumeed by night().
+~/dawn_dusk.csv
+At present it goes from first C05 recording 28/10/21 to the end of 2022
+dict = construct_dawn_dusk_dict("/home/david/dawn_dusk.csv")
+
+using CSV, DataFrames
+"""
+function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
+    sun = DataFrame(CSV.File(file))
+    x = Tuple(zip(sun.Dawn, sun.Dusk))
+    y = Dict(zip(sun.Date, x))
+    return y
+end
+
+"""
+night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
+
+Returns true if time is at night, ie between civil twilights, dusk to dawn.
+Consumes dict from construct_dawn_dusk_dict
+
+# Construct a date to test function
+
+# g=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
+"""
+function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
+    dawn = dict[Date(call_time)][1]
+    dusk = dict[Date(call_time)][2]
+    if call_time <= dawn || call_time >= dusk
+        return true
+    else
+        return false
+    end
+end
+
+end # module
