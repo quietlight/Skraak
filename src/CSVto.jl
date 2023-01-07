@@ -121,7 +121,7 @@ function airtable(file::String)
         #println(k, v)
     end
     # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my niw finder tagging workflow
-    CSV.write("$location/$trip_date/segments-$location-$(string(today()))", airtable)
+    CSV.write("$location/$trip_date/segments-$location-$(string(today())).csv", airtable)
     println("\ndone $location/$trip_date \n") 
     #return airtable (no longer needed as not using airtable anymore)
 end
@@ -302,6 +302,7 @@ Not must be a lonely label, on a line by itself, not mixed in with other labels,
 It's going to write files in folders, run in the correct Tagging subdirectory
 Assumes a file duration of 895 seconds.
 Writes evey label to file except "Not".
+Note when I make it work on Not files I will end up with multiple identical labels if there is more than one false positive in that file. 
 
 using CSV, DataFrames, DataFramesMeta
 """
@@ -337,19 +338,21 @@ function json(csv_file::String)
             write(io, """[ """)
             write(io, """{"Reviewer":"D", "Operator":"Finder", "Duration":895},""")
             for row in eachrow(group)
-                write(io, """[$(row.S), $(row.E), 0, 8000, """)
+                write(io, """[$(row.S), $(row.E), 100, 7900, """)
                 x = split(row.label, ",")
+                write(io, """[""")
                 for label in x
                     l = filter(x -> !isspace(x), label)
                     write(
                         io,
-                        """[{"species":"$l", "calltype":"", "filter": "Opensoundscape-Kiwi", "certainty":99}]""",
+                        """{"species":"$l", "calltype":"", "filter": "Opensoundscape-Kiwi", "certainty":99}""",
                     )
                     if label != last(x)
                         write(io, """,""")
                     end
                 end
-                write(io, """]""")
+                write(io, "]")
+                write(io, """]""") #check the form of json here, think its right.
                 if row != last(group)
                     write(io, """,""")
                 end
@@ -397,5 +400,7 @@ function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::
         return false
     end
 end
+
+
 
 end # module
