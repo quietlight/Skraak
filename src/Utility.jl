@@ -4,7 +4,8 @@ module Utility
 
 """
 Utility submodules:
-	UTCtoNZDT
+	twilight_tuple_local_time
+    UTCtoNZDT
 """
 
 export twilight_tuple_local_time, UTCtoNZDT

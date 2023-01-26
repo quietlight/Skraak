@@ -4,7 +4,9 @@ module JSONto
 
 """
 JSONto Submodules:
-airtable, kiwi_csv, mutate_call_type (not  exported),
+    airtable
+    kiwi_csv
+    mutate_call_type (not  exported)
 
 # cd to the working directory, to run:
 julia
