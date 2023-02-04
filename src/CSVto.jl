@@ -200,9 +200,11 @@ It is intended to be used for Male, Female, Close as it is correcting older anno
 
 It works on CSV's from hand labelled AvianNZ style JSON.
 
-It saves  wav files to /media/david/72CADE2ECADDEDFB/DataSet/$$$label/  
+It saves  wav files to /media/david/T7/TrainingData/2021-02-03_MFC/AudioData/  
 and annotation files to a seperate directory as raven files. (it would be 
 better for me to just build the csv direct, soon.)
+
+NOTE: change the destination directory manually as required.
 
     # cd to the working directory, to run:
     julia
@@ -210,7 +212,9 @@ better for me to just build the csv direct, soon.)
     x = glob("*/2022-10-08")
     for i in x
     cd(i)
-    Skraak.CSVto.dataset()
+    Skraak.CSVto.dataset(["Male", "Female", "Close"]) #For old label data
+    Skraak.CSVto.dataset(["Male", "Female", "Close", "Geese", "Kaka", "LTC", "Morepork", "Plover", "Not", "Kea"]) #For new label data
+
     #cd("/path/to/working/directory")
     cd("/media/david/Pomona-2/")
     end
@@ -227,6 +231,7 @@ function dataset(labels::Vector{String})
     
     else
         data_frame = DataFrame(CSV.File(raw_data[1]))
+        #data_frame = filter(row -> row.species != missing, DataFrame(CSV.File(raw_data[1])))
 
         for row in eachrow(data_frame)
             # correct to Male, Female, Close to match newer annotations
@@ -239,17 +244,14 @@ function dataset(labels::Vector{String})
             elseif row.species == "K-Close"
                 row.species = "Close"    
             
-            # correct K-MF to Male plus another row Female
+            # correct K-MF to Male plus another identical row with species=Female
             elseif row.species == "K-MF"
-                row.species = "Male"
-                new_row = row[:] # copy row             
-                new_row.species = "Female"
-                push!(data_frame, new_row)    
-
+                row.species = "Male"   
+                push!(data_frame, merge(row, (species="Female",))) 
             end
         end
 
-        println(pwd() * "\t" * levels(data_frame.species))
+        #println(pwd() * "\t" * levels(data_frame.species))
 
         # Check to see if labels exist in the data frame
         valid_labels = String[]
@@ -257,7 +259,7 @@ function dataset(labels::Vector{String})
         for label in labels
             if !(label in levels(data_frame.species))
                 message = pwd() * """ "$label" label not present"""
-                println(message)
+                println("$message")
             else
                 push!(valid_labels, label)
             end
@@ -273,6 +275,7 @@ function dataset(labels::Vector{String})
             path_sets = groupby(set, :Path)
 
             for file_path in eachindex(path_sets)
+                #print("$file_path")
                 f = path_sets[file_path]
                 data = Any[]
                 headers = Any[
@@ -310,7 +313,7 @@ function dataset(labels::Vector{String})
                     q = split(p[end-1], "|")
                     r = string(q[1], "_", q[2], "_", q[3])
                     output_file =
-                        "/media/david/72CADE2ECADDEDFB/DataSet/Annotations/" *
+                        "/media/david/T7/TrainingData/2023-02-03_Not/Annotations/" *
                         r *
                         ".Table.1.selections.txt"
                 else
@@ -321,7 +324,7 @@ function dataset(labels::Vector{String})
                 end
                 src = chop(f[1, :File_Name], tail = 5)
                 dst =
-                    "/media/david/72CADE2ECADDEDFB/DataSet/" *
+                    "/media/david/T7/TrainingData/2023-02-03_Not/AudioData/" *
                     q[1] *
                     "_" *
                     q[2] *
@@ -341,7 +344,7 @@ end
 """
 json(csv_file::String)
 
-Takes a csv from Finder labelling step and writes json for consumtion through AviaNZ labelling GUI.
+Takes a csv from Finder labelling step and writes json for consumption through AviaNZ labelling GUI.
 
 Note, if single labels are quoted csv wont read, quote multi labels only, or open with numbers then export, maybe use tsv instead of csv.
 Not must be a lonely label, on a line by itself, not mixed in with other labels, watch out for ", sanitise using find and replace in numbers.
