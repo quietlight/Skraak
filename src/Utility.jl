@@ -12,7 +12,6 @@ export twilight_tuple_local_time, UTCtoNZDT
 
 using CSV, DataFrames, Dates, HTTP, JSON, TimeZones
 
-
 """
 twilight_tuple_local_time(dt::Date)
 
@@ -51,21 +50,20 @@ function twilight_tuple_local_time(dt::Date)
     return (date, dawn_string, dusk_string)
 end
 
-
 """
 UTCtoNZDT(files::Vector{String})
 
-Takes a list of moth files and rewrites UTC filenames to NZDT, because since 
-reconfiguring my moths at start of daylight saving they are recording UTC 
+Takes a list of moth files and rewrites UTC filenames to NZDT, because since
+reconfiguring my moths at start of daylight saving they are recording UTC
 filenames which is not consistent with the way my notebook works.
 
 a = glob("*/2022-12-17/")
 for folder in a
-    cd(folder)
-    println(folder)
-    files = glob("*.WAV")
-	UTCtoNZDT(files)
-    cd("/media/david/Pomona-2")
+cd(folder)
+println(folder)
+files = glob("*.WAV")
+UTCtoNZDT(files)
+cd("/media/david/Pomona-2")
 end
 
 using Dates
@@ -104,6 +102,5 @@ function UTCtoNZDT(files::Vector{String})
     end
     print("Tidy\n")
 end
-
 
 end # module

@@ -14,23 +14,35 @@ CSVto submodules:
 
 export airtable, airtable_buckets, dataset, json
 
-using Glob, CSV, DataFrames, DataFramesMeta, Dates, DelimitedFiles, DSP, HTTP, JSON,Plots, Random, TimeZones, WAV
+using Glob,
+    CSV,
+    DataFrames,
+    DataFramesMeta,
+    Dates,
+    DelimitedFiles,
+    DSP,
+    HTTP,
+    JSON,
+    Plots,
+    Random,
+    TimeZones,
+    WAV
 """
 airtable()
 
-This function takes a preds.csv files and generates 
+This function takes a preds.csv files and generates
 file names, wav's, spectrograms etc to be uploaded to airtable for review.
 It returns a dataframe to be piped into airtable_buckets()
 it calls night() therefore night() must be available.
 
 It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
-It saves  wav and png files to /home/david/Upload/ 
+It saves  wav and png files to /home/david/Upload/
 It returns a dataframe to be piped into airtable_buckets()
 now saves a csv
 
 predictions = glob("path/to/preds*")
 for file in predictions
-    CSVto.airtable(file)
+CSVto.airtable(file)
 end
 
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
@@ -46,7 +58,13 @@ function airtable(file::String)
     )
     gdf = groupby(data, :present)
     pres = gdf[(present = 1,)]
-    pres_night = @subset(pres, @byrow night(:DateTime, (construct_dawn_dusk_dict("/media/david/027-7561938/PomonaData/dawn_dusk.csv")) )) #throw away nights
+    pres_night = @subset(
+        pres,
+        @byrow night(
+            :DateTime,
+            (construct_dawn_dusk_dict("/media/david/027-7561938/PomonaData/dawn_dusk.csv")),
+        )
+    ) #throw away nights
     #sort!(pres_night)
     files = groupby(pres_night, :file)
     #airtable = DataFrame(a = Any[], b = Any[])
@@ -87,7 +105,8 @@ function airtable(file::String)
             for detection in detections
                 #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
                 first(detection) > 0 ? st = first(detection) * freq : st = 1
-                (last(detection) + 5.0) * freq <= length(signal) ? en = (last(detection) + 5.0) * freq : en = length(signal)
+                (last(detection) + 5.0) * freq <= length(signal) ?
+                en = (last(detection) + 5.0) * freq : en = length(signal)
                 sample = signal[Int(st):Int(en)]
                 name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
                 outfile = "/home/david/Upload/$name"
@@ -125,7 +144,7 @@ function airtable(file::String)
     end
     # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my niw finder tagging workflow
     CSV.write("$location/$trip_date/segments-$location-$(string(today())).csv", airtable)
-    println("\ndone $location/$trip_date \n") 
+    println("\ndone $location/$trip_date \n")
     #return airtable (no longer needed as not using airtable anymore)
 end
 
@@ -149,7 +168,6 @@ for (index, value) in enumerate(b)
     println("$index")
     println("$value\n\n")
 end
-
 
 See simplenote for upload script, remember to cd into the numbered folder
 =#
@@ -212,8 +230,9 @@ NOTE: change the destination directory manually as required.
     x = glob("*/2022-10-08")
     for i in x
     cd(i)
-    Skraak.CSVto.dataset(["Male", "Female", "Close"]) #For old label data
-    Skraak.CSVto.dataset(["Male", "Female", "Close", "Geese", "Kaka", "LTC", "Morepork", "Plover", "Not", "Kea"]) #For new label data
+    #Skraak.CSVto.dataset(["Male", "Female", "Close"]) #For old label data
+    #Skraak.CSVto.dataset(["Male", "Female", "Close", "Geese", "Kaka", "LTC", "Morepork", "Plover", "Not", "Kea"]) #For new label data
+    Skraak.CSVto.dataset(["Kiwi", "Geese", "Kaka", "LTC", "Morepork", "Plover", "Not", "Kea"])
 
     #cd("/path/to/working/directory")
     cd("/media/david/Pomona-2/")
@@ -228,12 +247,13 @@ function dataset(labels::Vector{String})
     if length(raw_data) != 1
         message = pwd() * " has no kiwi_data csv present, or more than 1"
         return message
-    
+
     else
         data_frame = DataFrame(CSV.File(raw_data[1]))
         #data_frame = filter(row -> row.species != missing, DataFrame(CSV.File(raw_data[1])))
 
         for row in eachrow(data_frame)
+            #=
             # correct to Male, Female, Close to match newer annotations
             if row.species == "K-M"
                 row.species = "Male"
@@ -242,12 +262,22 @@ function dataset(labels::Vector{String})
                 row.species = "Female"
 
             elseif row.species == "K-Close"
-                row.species = "Close"    
-            
-            # correct K-MF to Male plus another identical row with species=Female
+                row.species = "Close"
+
+                # correct K-MF to Male plus another identical row with species=Female
             elseif row.species == "K-MF"
-                row.species = "Male"   
-                push!(data_frame, merge(row, (species="Female",))) 
+                row.species = "Male"
+                push!(data_frame, merge(row, (species = "Female",)))
+            end
+            =#
+            if row.species == "K-Set"
+                row.species = "Kiwi"
+
+            elseif row.species == "Male"
+                row.species = "Kiwi"
+
+            elseif row.species == "Female"
+                row.species = "Kiwi"
             end
         end
 
@@ -264,12 +294,12 @@ function dataset(labels::Vector{String})
                 push!(valid_labels, label)
             end
         end
-        
+
         if length(valid_labels) < 1
             message = pwd() * " no valid labels"
             return message
 
-        # If there are valid labels present construct the dataset
+            # If there are valid labels present construct the dataset
         else
             set = filter(:species => species -> species in valid_labels, data_frame)
             path_sets = groupby(set, :Path)
@@ -313,7 +343,7 @@ function dataset(labels::Vector{String})
                     q = split(p[end-1], "|")
                     r = string(q[1], "_", q[2], "_", q[3])
                     output_file =
-                        "/media/david/T7/TrainingData/2023-02-03_Not/Annotations/" *
+                        "/media/david/956f2166-5055-4648-b3af-e6cfcec11297/2023-02-13_Kiwi/Annotations/" *
                         r *
                         ".Table.1.selections.txt"
                 else
@@ -324,7 +354,7 @@ function dataset(labels::Vector{String})
                 end
                 src = chop(f[1, :File_Name], tail = 5)
                 dst =
-                    "/media/david/T7/TrainingData/2023-02-03_Not/AudioData/" *
+                    "/media/david/956f2166-5055-4648-b3af-e6cfcec11297/2023-02-13_Kiwi/AudioData/" *
                     q[1] *
                     "_" *
                     q[2] *
@@ -333,12 +363,8 @@ function dataset(labels::Vector{String})
                 cp(src, dst, force = true)
                 print(".")
             end
-        
         end
-
     end
-    
-    
 end
 
 """
@@ -351,7 +377,7 @@ Not must be a lonely label, on a line by itself, not mixed in with other labels,
 It's going to write files in folders, run in the correct Tagging subdirectory
 Assumes a file duration of 895 seconds.
 Writes evey label to file except "Not".
-Note when I make it work on Not files I will end up with multiple identical labels if there is more than one false positive in that file. 
+Note when I make it work on Not files I will end up with multiple identical labels if there is more than one false positive in that file.
 
 using CSV, DataFrames, DataFramesMeta
 """
@@ -449,7 +475,5 @@ function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::
         return false
     end
 end
-
-
 
 end # module
