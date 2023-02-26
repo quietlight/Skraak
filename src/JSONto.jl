@@ -5,6 +5,8 @@ module JSONto
 """
 JSONto Submodules:
     airtable
+    df_old_labels
+    df_new_labels
     kiwi_csv
     mutate_call_type (not  exported)
 
@@ -19,7 +21,7 @@ cd("/path/to/working/directory")
 end
 """
 
-export airtable, kiwi_csv, mutate_call_type
+export airtable, df_old_labels, df_new_labels, kiwi_csv
 
 using CSV, DataFrames, Dates, DelimitedFiles, DSP, Glob, JSON3, Plots, WAV, XMLDict
 
@@ -146,6 +148,230 @@ function airtable()
     end
 
     println("\n\n", "Done", "\n")
+end
+
+"""
+df_old_labels()
+
+This function takes hand labeled AviaNZ JSON and outputs a df to be put into a database table
+
+It is in the same place the wav files are, usually a removeable drive but could be on the Linux beasts internal drive.
+
+This function needs hand labelled .data files.
+
+Used like:
+using CSV
+for folder in folders
+    cd(folder)
+    df = df_old_labels()
+    CSV.write("/Users/davidcary/Desktop/pomona_labels_old.csv", df; append=true)
+    cd("/Volumes/Pomona-2/")
+end
+
+using DataFrames, Glob, JSON3
+"""
+
+# For K_set style labels
+function df_old_labels()::DataFrame
+    df = DataFrame(
+        location = String[],
+        file = String[],
+        box = Vector{Float64}[],
+        K_Set = Bool[],
+        Duet = Bool[],
+        K_Close = Bool[],
+        K_Ok = Bool[],
+        K_Far = Bool[],
+        K_M = Bool[],
+        K_F = Bool[],
+        K_MF = Bool[],
+        K_UMF = Bool[],
+        other_label = String[],
+        noise_level = String[],
+        noise_type = Vector{String}[],
+    )
+
+    data_list = glob("*.data")
+
+    if length(data_list) == 0
+        return df
+    end
+
+    raw_path_vec = split(pwd(), "/")[end-2:end]
+
+    #disk = raw_path_vec[1]
+    location = raw_path_vec[2]
+    #trip_date = raw_path_vec[3]
+
+    println("\n", raw_path_vec)
+
+    for f in data_list
+        file = chop(f, tail = 5)
+
+        json_string = read(f, String)
+        dict = JSON3.read(json_string)
+        if length(dict) > 1
+            noise_level = get(dict[1], "noiseLevel", missing)
+            noise_type = get(dict[1], "noiseTypes", missing)
+
+            for h in eachindex(dict[2:end])
+                box = dict[(h+1)][1:4]
+
+                row = Dict(
+                    :location => location,
+                    :file => file,
+                    :box => box,
+                    :K_Set => false,
+                    :Duet => false,
+                    :K_Close => false,
+                    :K_Ok => false,
+                    :K_Far => false,
+                    :K_M => false,
+                    :K_F => false,
+                    :K_MF => false,
+                    :K_UMF => false,
+                    :other_label => "",
+                    :noise_level => noise_level,
+                    :noise_type => noise_type,
+                )
+
+                for i in eachindex(dict[h+1][5])
+                    label = dict[(h+1)][5][i][:species]
+
+                    if label == "K-Set"
+                        row[:K_Set] = true
+                    elseif label == "Duet"
+                        row[:Duet] = true
+                    elseif label == "K-Close"
+                        row[:K_Close] = true
+                    elseif label == "K-Ok"
+                        row[:K_Ok] = true
+                    elseif label == "K-Far"
+                        row[:K_Far] = true
+                    elseif label == "K-M"
+                        row[:K_M] = true
+                    elseif label == "K-F"
+                        row[:K_F] = true
+                    elseif label == "K-MF"
+                        row[:K_MF] = true
+                    elseif label == "K-?MF"
+                        row[:K_UMF] = true
+                    else
+                        row[:other_label] = label
+                    end
+                end
+                push!(df, row)
+            end
+        end
+
+        print(".")
+    end
+
+    return df
+end
+
+# For New style labels
+function df_new_labels()::DataFrame
+    df = DataFrame(
+        location = String[],
+        file = String[],
+        box = Vector{Float64}[],
+        Male = Bool[],
+        Female = Bool[],
+        Close = Bool[],
+        Geese = Bool[],
+        Kaka = Bool[],
+        Kea = Bool[],
+        Listen = Bool[],
+        LTC = Bool[],
+        Morepork = Bool[],
+        Not = Bool[],
+        Plover = Bool[],
+        other_label = String[],
+    )
+
+    data_list = glob("*.data")
+
+    if length(data_list) == 0
+        return df
+    end
+
+    raw_path_vec = split(pwd(), "/")[end-2:end]
+
+    #disk = raw_path_vec[1]
+    location = raw_path_vec[2]
+    #trip_date = raw_path_vec[3]
+
+    println("\n", raw_path_vec)
+
+    for f in data_list
+        file = chop(f, tail = 5)
+
+        json_string = read(f, String)
+        dict = JSON3.read(json_string)
+        if length(dict) > 1
+
+            #noise_level = get(dict[1], "noiseLevel", missing)
+            #noise_type = get(dict[1], "noiseTypes", missing)
+
+            for h in eachindex(dict[2:end])
+                box = dict[(h+1)][1:4]
+
+                row = Dict(
+                    :location => location,
+                    :file => file,
+                    :box => box,
+                    :Male => false,
+                    :Female => false,
+                    :Close => false,
+                    :Geese => false,
+                    :Kaka => false,
+                    :Kea => false,
+                    :Listen => false,
+                    :LTC => false,
+                    :Morepork => false,
+                    :Not => false,
+                    :Plover => false,
+                    :other_label => "",
+                )
+
+                for i in eachindex(dict[h+1][5])
+                    label = dict[(h+1)][5][i][:species]
+
+                    if label == "Male"
+                        row[:Male] = true
+                    elseif label == "Female"
+                        row[:Female] = true
+                    elseif label == "Close"
+                        row[:Close] = true
+                    elseif label == "Geese"
+                        row[:Geese] = true
+                    elseif label == "Kaka"
+                        row[:Kaka] = true
+                    elseif label == "Kea"
+                        row[:Kea] = true
+                    elseif label == "Listen" || "?"
+                        row[:Listen] = true
+                    elseif label == "LTC"
+                        row[:LTC] = true
+                    elseif label == "Morepork"
+                        row[:Morepork] = true
+                    elseif label == "Not"
+                        row[:Not] = true
+                    elseif label == "Plover"
+                        row[:Plover] = true
+                    else
+                        row[:other_label] = label
+                    end
+                end
+                push!(df, row)
+            end
+        end
+
+        print(".")
+    end
+
+    return df
 end
 
 """
