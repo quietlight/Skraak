@@ -4,7 +4,7 @@ module CSVto
 
 """
 CSVto submodules:
-    airtable
+    clip
     airtable_buckets
     dataset
     json
@@ -28,7 +28,7 @@ using Glob,
     TimeZones,
     WAV
 """
-airtable()
+clip()
 
 This function takes a preds.csv files and generates
 file names, wav's, spectrograms etc to be uploaded to airtable for review.
@@ -38,31 +38,62 @@ it calls night() therefore night() must be available.
 It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
 It saves  wav and png files to /home/david/Upload/
 It returns a dataframe to be piped into airtable_buckets()
-now saves a csv
+!!!now saves a csv instead
 
+using Glob, Skraak
 predictions = glob("path/to/preds*")
 for file in predictions
-CSVto.airtable(file)
+CSVto.clip(file)
 end
+
+if needed to change headers in preds csv
+shift, control, f in subl
+file,start_time,end_time,0.0,1.0
+/media/david/Pomona-2,<project filters>, preds-2023-02-27.csv
+file,start_time,end_time,absent,present
 
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
-function airtable(file::String)
+function clip(file::String)
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(file, "/")
     data = DataFrame(CSV.File(file))
-    @transform!(
-        data,
-        @byrow :DateTime =
-            DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
-    )
+    
+    if !("file" in names(data))
+        println("\nNo Detections at $location/$trip_date \n")
+        return 
+    elseif "1.0" in names(data)
+        rename!(data, :"1.0" => :present)    
+    end
+    
+    if length(data.file[1]) > 19
+        @transform!(
+            data,
+            @byrow :DateTime =
+                DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
+                )
+    # To handle DOC recorders
+    else
+        @transform!(
+            data,
+            @byrow :DateTime =
+                DateTime((chop(:file, head = 2, tail = 4)[1:4] * "20" * chop(:file, head = 2, tail = 4)[5:end]), dateformat"ddmmyyyy_HHMMSS")
+                )
+    end
+
     gdf = groupby(data, :present)
-    pres = gdf[(present = 1,)]
+    if (present = 1,) in keys(gdf)
+        pres = gdf[(present = 1,)]
+    else
+        println("\nNo Detections at $location/$trip_date \n")
+        return 
+    end
+    dawn_dusk_dict = construct_dawn_dusk_dict("/media/david/USB/PomonaData/dawn_dusk.csv")
     pres_night = @subset(
         pres,
         @byrow night(
             :DateTime,
-            (construct_dawn_dusk_dict("/media/david/027-7561938/PomonaData/dawn_dusk.csv")),
+            dawn_dusk_dict,
         )
     ) #throw away nights
     #sort!(pres_night)
@@ -142,7 +173,7 @@ function airtable(file::String)
         print(".")
         #println(k, v)
     end
-    # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my niw finder tagging workflow
+    # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my new finder tagging workflow
     CSV.write("$location/$trip_date/segments-$location-$(string(today())).csv", airtable)
     println("\ndone $location/$trip_date \n")
     #return airtable (no longer needed as not using airtable anymore)

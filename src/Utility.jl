@@ -29,7 +29,7 @@ folders = glob("*/*/")
 for folder in folders
     cd(folder)
     df = file_metadata_to_df()
-    df_to_audiodata_db(df, "pomona_files")
+    audiodata_db(df, "pomona_files")
     cd("/Volumes/Pomona-2/")
 end
 
@@ -216,12 +216,14 @@ twilight_tuple_local_time(dt::Date)
 Takes a date and returns a tuple with local time twilight times. Use to make a Dataframe then csv.
 Queries api.sunrise-sunset.org
 
-Use like this:
+was using civil_twilight_end, civil_twilight_begin, changed to sunrise, sunset
 
+Use like this:
+Using CSV, Dates, RataFrames, Skraak
 df = DataFrame(Date=[], Dawn=[], Dusk=[])
-dr = Dates.Date(2023,01,01):Dates.Day(1):Dates.Date(2024,12,31)
+dr = Dates.Date(2019,01,01):Dates.Day(1):Dates.Date(2020,12,31)
 for day in dr
-    q = twilight_tuple_local_time(day)
+    q = Utility.twilight_tuple_local_time(day)
     isempty(q) ? println("fail $day") : push!(df, q)
     sleep(5)
 end
@@ -236,11 +238,11 @@ function twilight_tuple_local_time(dt::Date)
     )
     resp2 = String(resp1.body) |> JSON.Parser.parse
     resp3 = get(resp2, "results", "missing")
-    dusk_utc = get(resp3, "civil_twilight_end", "missing")
+    dusk_utc = get(resp3, "sunset", "missing")
     dusk_utc_zoned = ZonedDateTime(dusk_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
     dusk_local = astimezone(dusk_utc_zoned, tz"Pacific/Auckland")
     dusk_string = Dates.format(dusk_local, "yyyy-mm-ddTHH:MM:SS")
-    dawn_utc = get(resp3, "civil_twilight_begin", "missing")
+    dawn_utc = get(resp3, "sunrise", "missing")
     dawn_utc_zoned = ZonedDateTime(dawn_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
     dawn_local = astimezone(dawn_utc_zoned, tz"Pacific/Auckland")
     dawn_string = Dates.format(dawn_local, "yyyy-mm-ddTHH:MM:SS")
