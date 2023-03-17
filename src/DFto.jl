@@ -70,7 +70,10 @@ dfs = DataFrame.(CSV.File.(files))
 df = reduce(vcat, dfs)
 x=eval.(Meta.parse.(df.box)) 
 df.box = x
+sort!(df)
 CSV.write("/media/david/USB/Aggregate.csv", df)
+
+df2=df[4421:end, :]
 =#
 
 """
@@ -84,7 +87,7 @@ using DSP, Plots, WAV, DataFrames, CSV, Glob
 function img_dataset(df::DataFrame)
     for row in eachrow(df)
         signal, freq = wavread("$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)")
-        row.box[1] > 0 ? st = floor(Int, (row.box[1] * freq)) : st = 1
+        row.box[1] * freq > 1 ? st = floor(Int, (row.box[1] * freq)) : st = 1
         row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) : en = length(signal)
         sample = signal[Int(st):Int(en)]
         name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
@@ -103,7 +106,7 @@ function img_dataset(df::DataFrame)
         savefig(outfile)
         print(".")
     end
-    return done
+    println("done")
 end
 
 
