@@ -303,4 +303,17 @@ function UTCtoNZDT(files::Vector{String})
     print("Tidy\n")
 end
 
+#=
+using Images, Glob
+a=glob("*/*.png")
+for file in a
+    resize_image!(file)
+end
+works really fast
+=#
+function resize_image!(name::String, x::Int64=224, y::Int64=224)
+        small_image = imresize(load(name), (x, y))
+        save(name, small_image)
+end
+
 end # module

@@ -151,9 +151,21 @@ function clip(file::String)
                     S.time,
                     S.freq,
                     pow2db.(S.power),
+                    size=(448,448),
+                    showaxis=false,
+                    ticks=false,
+                    legend=false,
+                    thickness_scaling=0,
+                )
+#=
+                heatmap(
+                    S.time,
+                    S.freq,
+                    pow2db.(S.power),
                     xguide = "Time [s]",
                     yguide = "Frequency [Hz]",
                 )
+=#
                 savefig(outfile)
                 #push to to airtable df
                 push!(

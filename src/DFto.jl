@@ -71,9 +71,10 @@ df = reduce(vcat, dfs)
 x=eval.(Meta.parse.(df.box)) 
 df.box = x
 sort!(df)
+;cd /media/david
 CSV.write("/media/david/USB/Aggregate.csv", df)
 
-df2=df[4421:end, :]
+df2=df[4421:4521, :]
 =#
 
 """
@@ -82,7 +83,9 @@ img_dataset(df::DataFrame)
 Takes a dataframe and makes png spectro images for secondary classifier.
 Should be run from /media/david
 
+
 using DSP, Plots, WAV, DataFrames, CSV, Glob
+
 """
 function img_dataset(df::DataFrame)
     for row in eachrow(df)
@@ -100,8 +103,11 @@ function img_dataset(df::DataFrame)
             S.time,
             S.freq,
             pow2db.(S.power),
-            xguide = "Time [s]",
-            yguide = "Frequency [Hz]",
+            size=(448,448),
+            showaxis=false,
+            ticks=false,
+            legend=false,
+            thickness_scaling=0,
         )
         savefig(outfile)
         print(".")
