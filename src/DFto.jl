@@ -6,6 +6,8 @@ module DFto
 DFto Submodules:
     audiodata_db
     img_dataset
+
+Also: make dataset for image model
 """
 
 export audiodata_db
@@ -20,7 +22,6 @@ Takes a dataframe and inserts into AudioData.db table.
 
 using DataFrames, DBInterface, DuckDB, Random
 """
-
 function audiodata_db(df::DataFrame, table::String)
     temp_name = randstring(6)
     con = DBInterface.connect(DuckDB.DB, "/media/david/USB/AudioData.db")
@@ -37,6 +38,7 @@ function audiodata_db(df::DataFrame, table::String)
     )
     DBInterface.close!(con)
 end
+
 
 #=
 make dataset for image model
@@ -92,6 +94,7 @@ CSV.write("/media/david/USB/Aggregate.csv", df)
 
 df2=df[4421:4521, :]
 =#
+
 
 """
 img_dataset(df::DataFrame)

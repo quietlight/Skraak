@@ -8,8 +8,9 @@ CSVto submodules:
     airtable_buckets
     dataset
     json
-
-
+    construct_dawn_dusk_dict
+    night
+    aggreagte_labels
 """
 
 export airtable, airtable_buckets, dataset, json, night, construct_dawn_dusk_dict
@@ -251,6 +252,7 @@ function airtable_buckets(dataframe)
     end
 end
 
+
 """
 dataset()
 
@@ -283,7 +285,6 @@ NOTE: change the destination directory manually as required.
 
 using Glob, CSV, DataFrames, DelimitedFiles
 """
-
 function dataset(labels::Vector{String})
     raw_data = glob("kiwi_data-*.csv")
 
@@ -410,6 +411,7 @@ function dataset(labels::Vector{String})
     end
 end
 
+
 """
 json(csv_file::String)
 
@@ -484,6 +486,7 @@ function json(csv_file::String)
     println("\ndone")
 end
 
+
 """
 Takes dawn dusk.csv and returns a dict to be consumeed by night().
 ~/dawn_dusk.csv
@@ -500,6 +503,7 @@ function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTi
     y = Dict(zip(sun.Date, x))
     return y
 end
+
 
 """
 night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
@@ -522,10 +526,18 @@ function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::
     end
 end
 
-# assumes run from Clips_xxxx-xx-xx folder and that actual_mfdn.csv, predicted_cof.csv, predicted_noise.csv, and that
-# assumes file names if not specified
-# saves a csv and also returns a dataframe
-# using CSV, DataFrames, DataFramesMeta
+
+"""
+aggreagte_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
+
+This function prepares the csv output from my  hand classification and secondary models and ouputs a df, and csv for insertion into AudioData.duckdb using the duckdb cli or using DFto.audiodata_db()
+
+assumes run from Clips_xxxx-xx-xx folder and that actual_mfdn.csv, predicted_cof.csv, predicted_noise.csv, and that
+assumes file names if not specified
+saves a csv and also returns a dataframe
+
+using CSV, DataFrames, DataFramesMeta
+"""
 function aggreagte_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
     a=DataFrame(CSV.File(actual))
     c=DataFrame(CSV.File(cof))

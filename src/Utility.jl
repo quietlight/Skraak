@@ -4,9 +4,10 @@ module Utility
 
 """
 Utility submodules:
-    file_metadata_to_csv
+    file_metadata_to_df
 	twilight_tuple_local_time
     UTCtoNZDT
+    back_one_hour
     resize_image!
     check_png_wav_both_present
 """
@@ -18,11 +19,12 @@ using DelimitedFiles #???
 using Skraak.CSVto
 
 """
-file_metadata_to_csv()
+file_metadata_to_df()
 
 This function takes a file name, extracts wav metadata, gpx location, recording period start/end and returnes a dataframe.
 
 This function needs raw audiomoth wav files and a gpx.
+This function needs /media/david/SSD1/dawn_dusk.csv
 
 used like:
 using Glob, Skraak, CSV
@@ -37,12 +39,8 @@ end
 using DataFrames, Dates, DelimitedFiles, DuckDB, Glob, JSON3, Random, SHA, TimeZones, WAV, XMLDict
 """
 
-function file_metadata_to_csv()
-    #con = DBInterface.connect(DuckDB.DB, "/Users/davidcary/Desktop/AudioData.db")
-    #stmt = DBInterface.prepare(con, "INSERT INTO pomona_files VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-
-    #Initialise dataframe with columns: disk, location, trip_date, file, lattitude, longitude, start_recording_period_localt, finish_recording_period_localt, duration, sample_rate, zdt, ldt, moth_id, gain, battery, temperature
-    
+function file_metadata_to_df()
+    # Initialise dataframe with columns: disk, location, trip_date, file, lattitude, longitude, start_recording_period_localt, finish_recording_period_localt, duration, sample_rate, zdt, ldt, moth_id, gain, battery, temperature    
     df = DataFrame(
         disk = String[],
         location = String[],
@@ -218,13 +216,11 @@ function file_metadata_to_csv()
         ]
         push!(df, row)
 
-        #DBInterface.execute(stmt, row)
-        #. for each file processed
         print(".")
     end
     return df
-    #DBInterface.close!(con)
 end
+
 
 """
 twilight_tuple_local_time(dt::Date)
@@ -338,9 +334,30 @@ function UTCtoNZDT(files::Vector{String})
     print("Tidy\n")
 end
 
-function BackOneHour(files::Vector{String})
+
+""" 
+back_one_hour(files::Vector{String})
+
+This function takes a vector of file paths and renames each file in the
+vector by changing the name of the file to the name of the file created one
+hour before the original file. The new name format is yyyymmdd_HHMMSS.tmp,
+which represents the time stamp of the original file minus one hour. This
+function avoids force=true with mv, since new file names may already exist
+and mv will stacktrace leaving a big mess to tidy up.
+
+Args:
+
+•  files (Vector{String}): A vector of strings where each element is
+   a path to a file.
+
+Returns: Nothing - This function only renames files and saves them. 
+
+I use this to turn the clock back at the end of daylight saving.
+"""
+function back_one_hour(files::Vector{String})
     fix_extension_of_files = []
     for old_file in files
+        # Extract the date and time of the original file using string chopping
         a = chop(old_file, tail = 4)
         d, t = split(a, "_")
 
@@ -374,25 +391,64 @@ function BackOneHour(files::Vector{String})
 end
 
 
-#=
-using Images, Glob
-a=glob("*/*.png")
-for file in a
-    resize_image!(file)
-end
+""" 
+resize_image!(name::String, x::Int64=224, y::Int64=224)
+
+This function resizes an image with a specified name to a smaller size with
+dimensions x and y. By default, the dimensions are set to 224 x 224, which
+is common for image classification models.
+
+Args:
+
+•  name (String): A string representing the name and path of the
+   image file that needs to be resized.
+
+•  x (Int64): An integer representing the desired width of the
+   resized image. Default is set to 224.
+
+•  y (Int64): An integer representing the desired height of the
+   resized image. Default is set to 224.
+
+Returns: Nothing - This function only resizes the image and saves it to the
+same path.
+
+Use it like this:
+    using Images, Glob
+    a=glob("*/*.png")
+    for file in a
+        resize_image!(file)
+    end
+
 works really fast
-=#
+
+"""
 function resize_image!(name::String, x::Int64=224, y::Int64=224)
         small_image = imresize(load(name), (x, y))
         save(name, small_image)
 end
 
+
+""" 
+check_png_wav_both_present(folders::Vector{String})
+
+Given a vector of folder paths, this function checks whether each folder
+contains a matching .png and .wav file. If a folder does not contain a
+matching .wav file, a message is printed to indicate the folder path where
+the .wav file is missing.
+
+Args:
+
+•  folders (Vector{String}): A vector of strings where each element
+   is a path to a directory.
+
+Returns: Nothing - This function only prints messages to the console. 
+"""
 function check_png_wav_both_present(folders::Vector{String})
     println("No matching wav: ")
     for folder in folders
         println(folder)
         p=glob("$folder/*.png")
-        for png in  p
+        for png in p
             !isfile(chop(png, tail=3)*"wav") && println(png)
         end
     end
