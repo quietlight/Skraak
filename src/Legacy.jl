@@ -1,6 +1,313 @@
-# JSONto.jl
+# Legacy.jl
 
-module JSONto
+module Legacy
+
+"""
+Legacy submodules:
+    airtable_buckets
+    json
+    dataset
+    airtable
+    df_old_labels
+    df_new_labels
+    kiwi_csv
+    mutate_call_type (not  exported)
+"""
+
+
+"""
+airtable_buckets(dataframe)
+
+Takes a dataframe with columns Audio, Trip, FileName, Image, Length, StartTime, Location, and returns json in ~/Airtable to be uploaded to airtable.
+Intended to work with airtable() in a chain
+"""
+#=
+This stuff throws an error when in docstring above:
+
+#To divide json files into groups of 85 for upload to airtable
+a=glob("*.json")
+b=collect(Iterators.partition(a, 85))
+for (index, value) in enumerate(b)
+    mkpath("$index")
+    for item in value
+        mv(item, "$index/$item")
+    end
+    println("$index")
+    println("$value\n\n")
+end
+
+See simplenote for upload script, remember to cd into the numbered folder
+=#
+function airtable_buckets(dataframe)
+    e = floor(nrow(dataframe) / 10)
+    f = round((nrow(dataframe) / 10 - e) * 10)
+    g = []
+    for i in 1:e
+        for h in 1:10
+            push!(g, i)
+        end
+    end
+    for j in 1:f
+        push!(g, e + 1)
+    end
+    dataframe.Bin = g
+    grouped_dataframe = groupby(dataframe, :Bin)
+    for group in grouped_dataframe
+        index = randstring()
+        io = open("/home/david/Airtable/$index.json", "w")
+        write(io, """{"records":[""")
+        for row in eachrow(group)
+            write(io, """{"fields":{""")
+            write(io, """"Audio":[{"url": "$(row.Audio)"}],""")
+            write(io, """"Trip":"$(row.Trip)",""")
+            write(io, """"File Name":"$(row."FileName")",""")
+            write(io, """"Image":[{"url":"$(row.Image)"}],""")
+            write(io, """"Length (seconds)":$(row.Length),""")
+            write(io, """"Start Time": "$(row."StartTime")",""")
+            write(io, """"Location": "$(row.Location)" """)
+            write(io, """}}""")
+            if row != last(group)
+                write(io, """,""")
+            end
+        end
+        write(io, "]}")
+        close(io)
+    end
+end
+
+
+"""
+json(csv_file::String)
+
+Takes a csv from Finder labelling step and writes json for consumption through AviaNZ labelling GUI.
+
+Note, if single labels are quoted csv wont read, quote multi labels only, or open with numbers then export, maybe use tsv instead of csv.
+Not must be a lonely label, on a line by itself, not mixed in with other labels, watch out for ", sanitise using find and replace in numbers.
+It's going to write files in folders, run in the correct Tagging subdirectory
+Assumes a file duration of 895 seconds.
+Writes evey label to file except "Not".
+Note when I make it work on Not files I will end up with multiple identical labels if there is more than one false positive in that file.
+
+using CSV, DataFrames, DataFramesMeta
+"""
+function json(csv_file::String)
+    K = DataFrame(CSV.File(csv_file))
+    #subset(K, :label => ByRow(label -> label != "Not")) the one below is better, it ignores white space and other labels.
+    subset!(K, :label => ByRow(label -> !occursin(label, "Not")))
+    sort!(K, :file)
+    @transform!(K, @byrow :File = (split(:file, "-"))[5])
+    @transform!(K, @byrow :S = (split(:file, "-"))[6])
+    @transform!(K, @byrow :E = chop((split(:file, "-"))[7], tail = 4))
+    @transform!(
+        K,
+        @byrow :Path =
+            (split(:file, "-"))[1] *
+            "/" *
+            (split(:file, "-"))[2] *
+            "-" *
+            (split(:file, "-"))[3] *
+            "-" *
+            (split(:file, "-"))[4]
+    )
+    gdf = groupby(K, :Path)
+    #p=sort((combine(gdf, nrow)), :nrow) #This gives a nice list of nrows per recorder location 
+    #paths=p.Path
+    paths = levels(K.Path) # more efficient than above unless I am looking
+    mkpath.(paths)
+    #
+    for loc in gdf
+        B = groupby(loc, :File)
+        for group in B
+            io = open("$(group.Path[1])/$(group.File[1]).WAV.data", "w")
+            write(io, """[ """)
+            write(io, """{"Reviewer":"D", "Operator":"Finder", "Duration":895},""")
+            for row in eachrow(group)
+                write(io, """[$(row.S), $(row.E), 100, 7900, """)
+                x = split(row.label, ",")
+                write(io, """[""")
+                for label in x
+                    l = filter(x -> !isspace(x), label)
+                    write(
+                        io,
+                        """{"species":"$l", "calltype":"", "filter": "Opensoundscape-Kiwi", "certainty":99}""",
+                    )
+                    if label != last(x)
+                        write(io, """,""")
+                    end
+                end
+                write(io, "]")
+                write(io, """]""") #check the form of json here, think its right.
+                if row != last(group)
+                    write(io, """,""")
+                end
+            end
+            write(io, """ ]""")
+            close(io)
+            print(".")
+        end
+    end
+    #
+    println("\ndone")
+end
+
+
+"""
+dataset()
+
+This function takes a csv file in a folder and generates a dataset 
+from a vector of labels. 
+
+It is intended to be used for Male, Female, Close as it is correcting older annotations as it goes.
+
+It works on CSV's from hand labelled AvianNZ style JSON.
+
+It saves  wav files to /media/david/T7/TrainingData/2021-02-03_MFC/AudioData/  
+and annotation files to a seperate directory as raven files. (it would be 
+better for me to just build the csv direct, soon.)
+
+NOTE: change the destination directory manually as required.
+
+    # cd to the working directory, to run:
+    julia
+    using Glob, Skraak
+    x = glob("*/2022-10-08")
+    for i in x
+    cd(i)
+    #Skraak.CSVto.dataset(["Male", "Female", "Close"]) #For old label data
+    #Skraak.CSVto.dataset(["Male", "Female", "Close", "Geese", "Kaka", "LTC", "Morepork", "Plover", "Not", "Kea"]) #For new label data
+    Skraak.CSVto.dataset(["Kiwi", "Geese", "Kaka", "LTC", "Morepork", "Plover", "Not", "Kea"])
+
+    #cd("/path/to/working/directory")
+    cd("/media/david/Pomona-2/")
+    end
+
+using Glob, CSV, DataFrames, DelimitedFiles
+"""
+function dataset(labels::Vector{String})
+    raw_data = glob("kiwi_data-*.csv")
+
+    if length(raw_data) != 1
+        message = pwd() * " has no kiwi_data csv present, or more than 1"
+        return message
+
+    else
+        data_frame = DataFrame(CSV.File(raw_data[1]))
+        #data_frame = filter(row -> row.species != missing, DataFrame(CSV.File(raw_data[1])))
+
+        for row in eachrow(data_frame)
+            #=
+            # correct to Male, Female, Close to match newer annotations
+            if row.species == "K-M"
+                row.species = "Male"
+
+            elseif row.species == "K-F"
+                row.species = "Female"
+
+            elseif row.species == "K-Close"
+                row.species = "Close"
+
+                # correct K-MF to Male plus another identical row with species=Female
+            elseif row.species == "K-MF"
+                row.species = "Male"
+                push!(data_frame, merge(row, (species = "Female",)))
+            end
+            =#
+            if row.species == "K-Set"
+                row.species = "Kiwi"
+
+            elseif row.species == "Male"
+                row.species = "Kiwi"
+
+            elseif row.species == "Female"
+                row.species = "Kiwi"
+            end
+        end
+
+        #println(pwd() * "\t" * levels(data_frame.species))
+
+        # Check to see if labels exist in the data frame
+        valid_labels = String[]
+
+        for label in labels
+            if !(label in levels(data_frame.species))
+                message = pwd() * """ "$label" label not present"""
+                println("$message")
+            else
+                push!(valid_labels, label)
+            end
+        end
+
+        if length(valid_labels) < 1
+            message = pwd() * " no valid labels"
+            return message
+
+            # If there are valid labels present construct the dataset
+        else
+            set = filter(:species => species -> species in valid_labels, data_frame)
+            path_sets = groupby(set, :Path)
+
+            for file_path in eachindex(path_sets)
+                #print("$file_path")
+                f = path_sets[file_path]
+                data = Any[]
+                headers = Any[
+                    "Selection",
+                    "View",
+                    "Channel",
+                    "start_time",
+                    "end_time",
+                    "low_f",
+                    "high_f",
+                    "Species",
+                    "Notes",
+                ]
+                push!(data, headers)
+                for (index, row) in enumerate(eachrow(f))
+                    push!(
+                        data,
+                        [
+                            index,
+                            "Spectrogram 1",
+                            "1",
+                            row."Start Time (relative)",
+                            row."End Time (relative)",
+                            row.min_freq,
+                            row.max_freq,
+                            row.species,
+                            "",
+                        ],
+                    )
+                end
+                p = split(f[1, :Path], ".")
+                if length(p) < 3
+                    # Julia does not like | in file names, but all my csv files as already built with | in file path.
+                    # But I need q[1], q[2] later when I save the wav anyway, so its ok
+                    q = split(p[end-1], "|")
+                    r = string(q[1], "_", q[2], "_", q[3])
+                    output_file =
+                        "/media/david/956f2166-5055-4648-b3af-e6cfcec11297/2023-02-13_Kiwi/Annotations/" *
+                        r *
+                        ".Table.1.selections.txt"
+                else
+                    error("File names have gone to hell. One period only David")
+                end
+                open(output_file, "w") do io
+                    writedlm(io, data, '\t')
+                end
+                src = chop(f[1, :File_Name], tail = 5)
+                dst =
+                    "/media/david/956f2166-5055-4648-b3af-e6cfcec11297/2023-02-13_Kiwi/AudioData/" *
+                    q[1] *
+                    "_" *
+                    q[2] *
+                    "_" *
+                    src
+                cp(src, dst, force = true)
+                print(".")
+            end
+        end
+    end
+end
 
 """
 JSONto Submodules:
@@ -20,10 +327,6 @@ Skraak.JSONto.airtable() or Skraak.JSONto.kiwi_csv()
 cd("/path/to/working/directory")
 end
 """
-
-export airtable, df_old_labels, df_new_labels, kiwi_csv
-
-using CSV, DataFrames, Dates, DelimitedFiles, DSP, Glob, JSON3, Plots, WAV, XMLDict
 
 """
 airtable()
@@ -564,5 +867,7 @@ function mutate_call_type()
         end
     end
 end
+
+
 
 end # module

@@ -2,21 +2,101 @@
 
 module Utility
 
+using   CSV,
+        DataFrames, 
+        Dates,
+        DBInterface, 
+        DelimitedFiles,
+        DuckDB,
+        Glob,
+        HTTP,
+        Images,
+        JSON, #twilight_tuple_local_time
+        Random,
+        SHA,
+        TimeZones,
+        WAV,
+        XMLDict
+
 """
 Utility submodules:
-    file_metadata_to_df
-	twilight_tuple_local_time
-    UTCtoNZDT
-    back_one_hour
-    resize_image!
+    back_one_hour!
     check_png_wav_both_present
+    construct_dawn_dusk_dict
+    file_metadata_to_df
+    night
+    resize_image!
+	twilight_tuple_local_time
+    utc_to_nzdt!
 """
 
-export file_metadata_to_df, twilight_tuple_local_time, UTCtoNZDT
+export back_one_hour!, check_png_wav_both_present, construct_dawn_dusk_dict, file_metadata_to_df, night, resize_image!, twilight_tuple_local_time, utc_to_nzdt!
 
-using CSV, DataFrames, Dates, Glob, HTTP, JSON, SHA, TimeZones, WAV, XMLDict
-using DelimitedFiles #???
-using Skraak.CSVto
+
+"""
+audiodata_db(df::DataFrame, table::String)
+
+Takes a dataframe and inserts into AudioData.db table.
+
+using DataFrames, DBInterface, DuckDB, Random
+"""
+function audiodata_db(df::DataFrame, table::String)
+    temp_name = randstring(6)
+    con = DBInterface.connect(DuckDB.DB, "/media/david/USB/AudioData.db")
+    #con = DBInterface.connect(DuckDB.DB, "/Users/davidcary/Desktop/AudioData.db")
+    DuckDB.register_data_frame(con, df, temp_name)
+    DBInterface.execute(
+        con,
+        """
+        INSERT
+        INTO $table
+        SELECT *
+        FROM '$temp_name'
+        """,
+    )
+    DBInterface.close!(con)
+end
+
+
+"""
+Takes dawn dusk.csv and returns a dict to be consumeed by night().
+~/dawn_dusk.csv
+At present it goes from the start of 2019 to the end of 2024
+The csv contains local time sunrise and sunset
+I use this to decide if a file with a local time encoded name was recorded at night
+
+dict = construct_dawn_dusk_dict("/Volumes/SSD1/dawn_dusk.csv")
+dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+
+using CSV, DataFrames
+"""
+function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
+    sun = DataFrame(CSV.File(file))
+    x = Tuple(zip(sun.Dawn, sun.Dusk))
+    y = Dict(zip(sun.Date, x))
+    return y
+end
+
+
+"""
+night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
+
+Returns true if time is at night, ie between civil twilights, dusk to dawn.
+Consumes dict from construct_dawn_dusk_dict
+
+time=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
+Utility.night(time, dict)
+"""
+function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
+    dawn = dict[Date(call_time)][1]
+    dusk = dict[Date(call_time)][2]
+    if call_time <= dawn || call_time >= dusk
+        return true
+    else
+        return false
+    end
+end
+
 
 """
 file_metadata_to_df()
@@ -283,7 +363,7 @@ end
 
 
 """
-UTCtoNZDT(files::Vector{String})
+utc_to_nzdt!files::Vector{String})
 
 Takes a list of moth files and rewrites UTC filenames to NZDT, because since
 reconfiguring my moths at start of daylight saving they are recording UTC
@@ -294,13 +374,13 @@ for folder in a
 cd(folder)
 println(folder)
 files = glob("*.WAV")
-UTCtoNZDT(files)
+utc_to_nzdt!files)
 cd("/media/david/Pomona-2")
 end
 
 using Dates, TimeZones
 """
-function UTCtoNZDT(files::Vector{String})
+function utc_to_nzdt!files::Vector{String})
     fix_extension_of_files = []
     for old_file in files
         a = chop(old_file, tail = 4)
@@ -336,7 +416,7 @@ end
 
 
 """ 
-back_one_hour(files::Vector{String})
+back_one_hour!(files::Vector{String})
 
 This function takes a vector of file paths and renames each file in the
 vector by changing the name of the file to the name of the file created one
@@ -354,7 +434,7 @@ Returns: Nothing - This function only renames files and saves them.
 
 I use this to turn the clock back at the end of daylight saving.
 """
-function back_one_hour(files::Vector{String})
+function back_one_hour!(files::Vector{String})
     fix_extension_of_files = []
     for old_file in files
         # Extract the date and time of the original file using string chopping
