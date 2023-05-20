@@ -12,7 +12,7 @@ CSVto submodules:
 
 """
 
-export airtable, airtable_buckets, dataset, json
+export airtable, airtable_buckets, dataset, json, night, construct_dawn_dusk_dict
 
 using Glob,
     CSV,
@@ -88,7 +88,7 @@ function clip(file::String)
         println("\nNo Detections at $location/$trip_date \n")
         return 
     end
-    dawn_dusk_dict = construct_dawn_dusk_dict("/media/david/USB/PomonaData/dawn_dusk.csv")
+    dawn_dusk_dict = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
     pres_night = @subset(
         pres,
         @byrow night(
@@ -491,6 +491,8 @@ At present it goes from first C05 recording 28/10/21 to the end of 2022
 dict = construct_dawn_dusk_dict("/home/david/dawn_dusk.csv")
 
 using CSV, DataFrames
+
+a=CSVto.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
 """
 function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
     sun = DataFrame(CSV.File(file))
@@ -508,6 +510,7 @@ Consumes dict from construct_dawn_dusk_dict
 # Construct a date to test function
 
 # g=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
+CSVto.night(g, a)
 """
 function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
     dawn = dict[Date(call_time)][1]
@@ -519,4 +522,53 @@ function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::
     end
 end
 
+# assumes run from Clips_xxxx-xx-xx folder and that actual_mfdn.csv, predicted_cof.csv, predicted_noise.csv, and that
+# assumes file names if not specified
+# saves a csv and also returns a dataframe
+# using CSV, DataFrames, DataFramesMeta
+function aggreagte_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
+    a=DataFrame(CSV.File(actual))
+    c=DataFrame(CSV.File(cof))
+    rename!(c,:label => :distance)
+    n=DataFrame(CSV.File(noise))
+    rename!(n,:label => :noise)
+
+    # make unique true not needed now I have renamed label column, but will help later maybe, in case of duplicate label names.
+    x=leftjoin(a, c, on = :file)
+    df=leftjoin(x, n, on = :file, makeunique=true)
+
+    # location, f, box
+    @transform!(df, @byrow :location = split(split(:file, "/")[2], "-")[1])
+    @transform!(df, @byrow :f = split(split(:file, "/")[2], "-")[5] * ".WAV")
+    @transform!(df, @byrow :box = "[$(split(split(:file, "/")[2], "-")[end-1]), $(chop(split(split(:file, "/")[2], "-")[end], tail=4))]" )
+
+    # male, female, duet, not
+    @transform!(df, @byrow @passmissing :male = split(:file, "/")[1] == "M" ? true : false)
+    @transform!(df, @byrow @passmissing :female = split(:file, "/")[1] == "F" ? true : false)
+    @transform!(df, @byrow @passmissing :duet = split(:file, "/")[1] == "D" ? true : false)
+    @transform!(df, @byrow @passmissing :not_kiwi = split(:file, "/")[1] in ["KA", "KE", "N", "Q"] ? true : false)
+
+    # other_label
+    @transform!(df, @byrow @passmissing :other_label = split(:file, "/")[1] in ["KA", "KE", "Q"] ? split(:file, "/")[1] : missing)
+
+    # distance
+    @transform!(df, @byrow @passmissing :close_call = :distance == "C" ? true : false)
+    @transform!(df, @byrow @passmissing :ok_call = :distance == "O" ? true : false)
+    @transform!(df, @byrow @passmissing :far_call = :distance == "F" ? true : false)
+    
+    # noise
+    @transform!(df, @byrow @passmissing :low_noise = :noise == "L" ? true : false)
+    @transform!(df, @byrow @passmissing :medium_noise = :noise == "M" ? true : false)
+    @transform!(df, @byrow @passmissing :high_noise = :noise == "H" ? true : false)
+    @transform!(df, @byrow @passmissing :terrible_noise = :noise == "T" ? true : false)
+    
+    # remove unwanted cols, rename f to file
+    select!(df, Not([:file, :distance, :noise]))
+    rename!(df, :f => :file)
+
+    CSV.write(outfile, df)
+    return df
+end
+
 end # module
+

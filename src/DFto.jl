@@ -5,7 +5,7 @@ module DFto
 """
 DFto Submodules:
     audiodata_db
-
+    img_dataset
 """
 
 export audiodata_db
@@ -40,11 +40,27 @@ end
 
 #=
 make dataset for image model
+drive   location    trip_date   file    box     label
 
 using CSV, DataFrames, DataFramesMeta, Glob
 
 m = DataFrame(CSV.File("/media/david/USB/images_model/P_Male.csv"))
 
+#run from media/david
+function get_drive_and_trip_date(location, file)
+    a=glob("Pomona-*/Pomona-*/$location/*/$file")
+    length(a) > 0 ? b=split(a[1], "/") : b=missing
+    return b
+end
+
+c = DataFrame(CSV.File("/media/david/USB/SecondaryModel_COF/close.csv"))
+#note: dropmissing!(df) or @transform df @byrow @passmissing or delete rows that dont work
+@transform!(c, @byrow :trip_date=get_drive_and_trip_date(:location, :file)[4])
+@transform!(c, @byrow :drive=get_drive_and_trip_date(:location, :file)[1])
+CSV.write("/media/david/USB/SecondaryModel_COF/close.csv", c)
+
+
+#get trip date
 function get_td(drive, location, file)
        a=glob("$drive/$drive/$location/*/$file")
        length(a) > 0 ? b=split(a[1], "/")[end-1] : b=missing

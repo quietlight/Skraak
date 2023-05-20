@@ -4,43 +4,45 @@ module Utility
 
 """
 Utility submodules:
-    file_metadata_to_df
+    file_metadata_to_csv
 	twilight_tuple_local_time
     UTCtoNZDT
+    resize_image!
+    check_png_wav_both_present
 """
 
 export file_metadata_to_df, twilight_tuple_local_time, UTCtoNZDT
 
-using CSV, DataFrames, Dates, Glob, HTTP, JSON, TimeZones, WAV, XMLDict
+using CSV, DataFrames, Dates, Glob, HTTP, JSON, SHA, TimeZones, WAV, XMLDict
 using DelimitedFiles #???
+using Skraak.CSVto
 
 """
-file_metadata_to_df()
+file_metadata_to_csv()
 
-This function takes a file name, extracts wav metadata, gpx location, recording period start/end and saves to a database table
-
-It is in the same place the wav files are, usually a removeable drive 
-but could be on the Linux beasts internal drive.
+This function takes a file name, extracts wav metadata, gpx location, recording period start/end and returnes a dataframe.
 
 This function needs raw audiomoth wav files and a gpx.
 
 used like:
-folders = glob("*/*/")
+using Glob, Skraak, CSV
+folders=glob("*/*/")
 for folder in folders
-    cd(folder)
-    df = file_metadata_to_df()
-    audiodata_db(df, "pomona_files")
-    cd("/Volumes/Pomona-2/")
+cd(folder)
+df = Utility.file_metadata_to_df()
+CSV.write("/media/david/Pomona-2/Pomona-2/pomona_files.csv", df; append=true)
+cd("/media/david/Pomona-2/Pomona-2/")
 end
 
-using DataFrames, Dates, DelimitedFiles, DuckDB, Glob, JSON3, Random, TimeZones, WAV, XMLDict
+using DataFrames, Dates, DelimitedFiles, DuckDB, Glob, JSON3, Random, SHA, TimeZones, WAV, XMLDict
 """
 
-function file_metadata_to_df()
+function file_metadata_to_csv()
     #con = DBInterface.connect(DuckDB.DB, "/Users/davidcary/Desktop/AudioData.db")
     #stmt = DBInterface.prepare(con, "INSERT INTO pomona_files VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 
     #Initialise dataframe with columns: disk, location, trip_date, file, lattitude, longitude, start_recording_period_localt, finish_recording_period_localt, duration, sample_rate, zdt, ldt, moth_id, gain, battery, temperature
+    
     df = DataFrame(
         disk = String[],
         location = String[],
@@ -52,12 +54,14 @@ function file_metadata_to_df()
         finish_recording_period_localt = String[],
         duration = Float64[],
         sample_rate = Int[],
-        zdt = String[],
+        utc = String[],
         ldt = String[],
         moth_id = String[],
         gain = String[],
         battery = Float64[],
         temperature = Float64[],
+        sha2_256 = String[],
+        night = Bool[]
     )
 
     #Get WAV list for folder
@@ -138,6 +142,8 @@ function file_metadata_to_df()
     finish_recording_period_localt =
         Dates.format(astimezone(zdt2, tz"Pacific/Auckland"), "yyyy-mm-dd HH:MM:SSzzzz")
 
+    dict = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+
     #So I know what it is doing
     println(raw_path_vec)
 
@@ -171,7 +177,9 @@ function file_metadata_to_df()
             "000" *
             time_zone
         preformatting_zdt = ZonedDateTime(time_string)
-        zdt = Dates.format(preformatting_zdt, "yyyy-mm-dd HH:MM:SSzzzz")
+        #zdt = Dates.format(preformatting_zdt, "yyyy-mm-dd HH:MM:SSzzzz")
+        preformatting_utc = astimezone(preformatting_zdt, tz"UTC")
+        utc = Dates.format(preformatting_utc, "yyyy-mm-dd HH:MM:SSzzzz")
         preformatting_ldt = astimezone(preformatting_zdt, tz"Pacific/Auckland")
         ldt = Dates.format(preformatting_ldt, "yyyy-mm-dd HH:MM:SSzzzz")
 
@@ -180,6 +188,12 @@ function file_metadata_to_df()
         #index back from end because if V > 4.9 the wording chaaanges
         battery = parse(Float64, chop(comment_vector[end-4], tail = 1))
         temperature = parse(Float64, chop(comment_vector[end], tail = 2))
+
+        sha2_256 = bytes2hex(sha256(file))
+
+        #assumes 15 minute file and calculates on half way time
+
+        nt = night(DateTime(preformatting_ldt + Minute(7) + Second(30)), dict)
 
         #Populate row to push into df
         row = [
@@ -193,12 +207,14 @@ function file_metadata_to_df()
             finish_recording_period_localt,
             duration,
             Int(sample_rate),
-            zdt,
+            utc,
             ldt,
             moth_id,
             gain,
             battery,
             temperature,
+            sha2_256,
+            nt
         ]
         push!(df, row)
 
@@ -219,9 +235,9 @@ Queries api.sunrise-sunset.org
 was using civil_twilight_end, civil_twilight_begin, changed to sunrise, sunset
 
 Use like this:
-Using CSV, Dates, RataFrames, Skraak
+Using CSV, Dates, DataFrames, Skraak
 df = DataFrame(Date=[], Dawn=[], Dusk=[])
-dr = Dates.Date(2019,01,01):Dates.Day(1):Dates.Date(2020,12,31)
+dr = Dates.Date(2019,01,01):Dates.Day(1):Dates.Date(2024,12,31)
 for day in dr
     q = Utility.twilight_tuple_local_time(day)
     isempty(q) ? println("fail $day") : push!(df, q)
@@ -250,6 +266,26 @@ function twilight_tuple_local_time(dt::Date)
     return (date, dawn_string, dusk_string)
 end
 
+#use  this function to get a date range of data, saves to csv in cwd and  returns df  
+function twilight_tuple_local_time(dr::StepRange{Date, Day})
+    # C05 co-ordinates hard coded into function
+    cols = ["day","solar_noon","sunrise","day_length","sunset","civil_twilight_end","astronomical_twilight_end","astronomical_twilight_begin","nautical_twilight_begin" ,"civil_twilight_begin","nautical_twilight_end"]
+    df = DataFrame([ name =>[] for name in cols]) 
+    for day in dr
+        resp = HTTP.get("https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$day&formatted=0",) |>
+            x -> String(x.body) |> 
+            JSON.Parser.parse |>
+            x -> get(x, "results", "missing")
+        resp["day"] = string(day)
+        push!(df, resp)
+        print("$day  ")
+        sleep(3)
+    end   
+    CSV.write("sunrise_sunset.csv", df)    
+    return df
+end
+
+
 """
 UTCtoNZDT(files::Vector{String})
 
@@ -266,7 +302,7 @@ UTCtoNZDT(files)
 cd("/media/david/Pomona-2")
 end
 
-using Dates
+using Dates, TimeZones
 """
 function UTCtoNZDT(files::Vector{String})
     fix_extension_of_files = []
@@ -281,9 +317,43 @@ function UTCtoNZDT(files::Vector{String})
         mi = parse(Int64, t[3:4])
         se = parse(Int64, t[5:6])
 
+        dt = ZonedDateTime(ye, mo, da, ho, mi, se, tz"UTC")
+        new_date = astimezone(dt, tz"Pacific/Auckland")
+        # Must drop the WAV extension to avoiding force=true 
+        # with  mv, since  the new file name may already exist and mv
+        # will stacktrace leaving a big mess to tidy up.
+        isfile(Dates.format(new_date, "yyyymmdd_HHMMSS") * ".tmp") ? base_file = Dates.format((new_date + Dates.Second(1)), "yyyymmdd_HHMMSS") : base_file = Dates.format(new_date, "yyyymmdd_HHMMSS")
+        temp_file = base_file * ".tmp"
+
+        # Tuple to tidy extensions later
+        tidy = (temp_file, base_file * ".WAV")
+
+        mv(old_file, temp_file)
+        push!(fix_extension_of_files, tidy)
+        print(".")
+    end
+    for item in fix_extension_of_files
+        mv(item[1], item[2])
+    end
+    print("Tidy\n")
+end
+
+function BackOneHour(files::Vector{String})
+    fix_extension_of_files = []
+    for old_file in files
+        a = chop(old_file, tail = 4)
+        d, t = split(a, "_")
+
+        ye = parse(Int64, d[1:4])
+        mo = parse(Int64, d[5:6])
+        da = parse(Int64, d[7:8])
+        ho = parse(Int64, t[1:2])
+        mi = parse(Int64, t[3:4])
+        se = parse(Int64, t[5:6])
+
         dt = DateTime(ye, mo, da, ho, mi, se)
-        # Note assumes daylight saving
-        new_date = dt + Dates.Hour(13)
+        
+        new_date = dt - Dates.Hour(1)
         # Must drop the WAV extension to avoiding force=true 
         # with  mv, since  the new file name may already exist and mv
         # will stacktrace leaving a big mess to tidy up.
@@ -303,6 +373,7 @@ function UTCtoNZDT(files::Vector{String})
     print("Tidy\n")
 end
 
+
 #=
 using Images, Glob
 a=glob("*/*.png")
@@ -314,6 +385,17 @@ works really fast
 function resize_image!(name::String, x::Int64=224, y::Int64=224)
         small_image = imresize(load(name), (x, y))
         save(name, small_image)
+end
+
+function check_png_wav_both_present(folders::Vector{String})
+    println("No matching wav: ")
+    for folder in folders
+        println(folder)
+        p=glob("$folder/*.png")
+        for png in  p
+            !isfile(chop(png, tail=3)*"wav") && println(png)
+        end
+    end
 end
 
 end # module
