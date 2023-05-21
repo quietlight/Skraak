@@ -1,6 +1,6 @@
 module Skraak
 
-export aggreagte_labels, clip, Utility
+export aggregate_labels, clip, Utility
 
 include("Utility.jl")
 
@@ -149,7 +149,7 @@ end
 #INBETWEEN STEP: use secondary model to sort clips, move clips into D, F, M, N, and hand classify, classify into COF, Noise, geneerate csv's.
 
 """
-aggreagte_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
+aggregate_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
 
 file
 [D, F, M, N]/C05-2023-04-15-20230219_223000-380-470.png
@@ -173,7 +173,7 @@ saves a csv and also returns a dataframe
 
 using CSV, DataFrames, DataFramesMeta
 """
-function aggreagte_labels(
+function aggregate_labels(
     actual = "actual_mfdn.csv",
     cof = "predicted_cof.csv",
     noise = "predicted_noise.csv",
