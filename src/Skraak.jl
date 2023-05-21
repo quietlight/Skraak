@@ -155,105 +155,24 @@ function clip(file::String)
     println("\ndone $location/$trip_date \n")
 end
 
-
-#=
-make dataset for image model
-drive   location    trip_date   file    box     label
-
-using CSV, DataFrames, DataFramesMeta, Glob
-
-m = DataFrame(CSV.File("/media/david/USB/images_model/P_Male.csv"))
-
-#run from media/david
-function get_drive_and_trip_date(location, file)
-    a=glob("Pomona-*/Pomona-*/$location/*/$file")
-    length(a) > 0 ? b=split(a[1], "/") : b=missing
-    return b
-end
-
-c = DataFrame(CSV.File("/media/david/USB/SecondaryModel_COF/close.csv"))
-#note: dropmissing!(df) or @transform df @byrow @passmissing or delete rows that dont work
-@transform!(c, @byrow :trip_date=get_drive_and_trip_date(:location, :file)[4])
-@transform!(c, @byrow :drive=get_drive_and_trip_date(:location, :file)[1])
-CSV.write("/media/david/USB/SecondaryModel_COF/close.csv", c)
-
-
-#get trip date
-function get_td(drive, location, file)
-       a=glob("$drive/$drive/$location/*/$file")
-       length(a) > 0 ? b=split(a[1], "/")[end-1] : b=missing
-       return b
-       end
-
-@transform!(m, @byrow :trip_date=get_td(:drive, :location, :file))
-
-CSV.write("/media/david/USB/P_Male.csv", m)
-
-f = DataFrame(CSV.File("/media/david/USB/images_model/P_Female.csv"))
-@transform!(f, @byrow :trip_date=get_td(:drive, :location, :file))
-CSV.write("/media/david/USB/P_Female.csv", f)
-
-
-d = DataFrame(CSV.File("/media/david/USB/images_model/P_Duet.csv"))
-@transform!(d, @byrow :trip_date=get_td(:drive, :location, :file))
-CSV.write("/media/david/USB/P_Duet.csv", d)
-
-
-files=glob("*.csv")
-dfs = DataFrame.(CSV.File.(files))
-df = reduce(vcat, dfs)
-x=eval.(Meta.parse.(df.box)) 
-df.box = x
-sort!(df)
-;cd /media/david
-CSV.write("/media/david/USB/Aggregate.csv", df)
-
-df2=df[4421:4521, :]
-=#
-
-
-"""
-img_dataset(df::DataFrame)
-
-Takes a dataframe and makes png spectro images for secondary classifier.
-Should be run from /media/david
-
-
-using DSP, Plots, WAV, DataFrames, CSV, Glob
-
-"""
-function img_dataset(df::DataFrame)
-    for row in eachrow(df)
-        signal, freq = wavread("$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)")
-        row.box[1] * freq > 1 ? st = floor(Int, (row.box[1] * freq)) : st = 1
-        row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) : en = length(signal)
-        sample = signal[Int(st):Int(en)]
-        name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
-        outfile = "/home/david/ImageSet/$(row.label)/$name"
-        #spectrogram
-        n = 400
-        fs = convert(Int, freq)
-        S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
-        heatmap(
-            S.time,
-            S.freq,
-            pow2db.(S.power),
-            size=(448,448),
-            showaxis=false,
-            ticks=false,
-            legend=false,
-            thickness_scaling=0,
-        )
-        savefig(outfile)
-        print(".")
-    end
-    println("done")
-end
-
-
+#INBETWEEN STEP: use secondary model to sort clips, move clips into D, F, M, N, and hand classify, classify into COF, Noise, geneerate csv's.
 
 """
 aggreagte_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
+
+file
+[D, F, M, N]/C05-2023-04-15-20230219_223000-380-470.png
+
+file	label
+D/C05-2023-04-15-20230219_223000-380-470.png	C
+D/C05-2023-04-15-20230220_000000-670-715.png	O
+D/C05-2023-04-15-20230221_050000-435-473.png	F
+
+file	label
+D/C05-2023-04-15-20230219_223000-380-470.png	L
+D/C05-2023-04-15-20230220_000000-670-715.png	M
+D/C05-2023-04-15-20230221_050000-435-473.png	H
+D/C05-2023-04-15-20230221_053000-810-850.png	T
 
 This function prepares the csv output from my  hand classification and secondary models and ouputs a df, and csv for insertion into AudioData.duckdb using the duckdb cli or using DFto.audiodata_db()
 
