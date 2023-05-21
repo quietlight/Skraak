@@ -1,6 +1,6 @@
 module Skraak
 
-export aggreagte_labels, clip, dataset, Utility
+export aggreagte_labels, clip, Utility
 
 include("Utility.jl")
 
@@ -15,19 +15,8 @@ Skraak submodules:
 	#Legacy#
 """
 
-using   CSV,
-        DataFrames,
-        DataFramesMeta,
-        Dates,
-        DSP,
-        Glob,
-        HTTP,
-        JSON,
-        Plots,
-        Random,
-        TimeZones,
-        WAV
-
+using CSV,
+    DataFrames, DataFramesMeta, Dates, DSP, Glob, HTTP, JSON, Plots, Random, TimeZones, WAV
 
 """
 clip()
@@ -42,7 +31,7 @@ It saves  wav and png files to /home/david/Upload/
 using Glob, Skraak
 predictions = glob("path/to/preds*")
 for file in predictions
-	clip(file)
+clip(file)
 end
 
 if needed to change headers in preds csv
@@ -57,27 +46,33 @@ function clip(file::String)
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(file, "/")
     data = DataFrame(CSV.File(file))
-    
+
     if !("file" in names(data))
         println("\nNo Detections at $location/$trip_date \n")
-        return 
+        return
     elseif "1.0" in names(data)
-        rename!(data, :"1.0" => :present)    
+        rename!(data, :"1.0" => :present)
     end
-    
+
     if length(data.file[1]) > 19
         @transform!(
             data,
             @byrow :DateTime =
                 DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
-                )
-    # To handle DOC recorders
+        )
+        # To handle DOC recorders
     else
         @transform!(
             data,
-            @byrow :DateTime =
-                DateTime((chop(:file, head = 2, tail = 4)[1:4] * "20" * chop(:file, head = 2, tail = 4)[5:end]), dateformat"ddmmyyyy_HHMMSS")
-                )
+            @byrow :DateTime = DateTime(
+                (
+                    chop(:file, head = 2, tail = 4)[1:4] *
+                    "20" *
+                    chop(:file, head = 2, tail = 4)[5:end]
+                ),
+                dateformat"ddmmyyyy_HHMMSS",
+            )
+        )
     end
 
     gdf = groupby(data, :present)
@@ -85,17 +80,14 @@ function clip(file::String)
         pres = gdf[(present = 1,)]
     else
         println("\nNo Detections at $location/$trip_date \n")
-        return 
+        return
     end
 
     dawn_dusk_dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
-    pres_night = @subset(
-        pres,
-        @byrow night(:DateTime, dawn_dusk_dict)
-    	)
+    pres_night = @subset(pres, @byrow night(:DateTime, dawn_dusk_dict))
 
     files = groupby(pres_night, :file)
-    
+
     for (k, v) in pairs(files)
         file_start_time = v.DateTime[1]
         file_name = chop(v.file[1], head = 2, tail = 4)
@@ -139,15 +131,14 @@ function clip(file::String)
                     S.time,
                     S.freq,
                     pow2db.(S.power),
-                    size=(448,448),
-                    showaxis=false,
-                    ticks=false,
-                    legend=false,
-                    thickness_scaling=0,
+                    size = (448, 448),
+                    showaxis = false,
+                    ticks = false,
+                    legend = false,
+                    thickness_scaling = 0,
                 )
 
                 savefig(outfile)
-                
             end
         end
         print(".")
@@ -182,42 +173,61 @@ saves a csv and also returns a dataframe
 
 using CSV, DataFrames, DataFramesMeta
 """
-function aggreagte_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
-    a=DataFrame(CSV.File(actual))
-    c=DataFrame(CSV.File(cof))
-    rename!(c,:label => :distance)
-    n=DataFrame(CSV.File(noise))
-    rename!(n,:label => :noise)
+function aggreagte_labels(
+    actual = "actual_mfdn.csv",
+    cof = "predicted_cof.csv",
+    noise = "predicted_noise.csv",
+    outfile = "pomona_labels.csv",
+)
+    a = DataFrame(CSV.File(actual))
+    c = DataFrame(CSV.File(cof))
+    rename!(c, :label => :distance)
+    n = DataFrame(CSV.File(noise))
+    rename!(n, :label => :noise)
 
     # make unique true not needed now I have renamed label column, but will help later maybe, in case of duplicate label names.
-    x=leftjoin(a, c, on = :file)
-    df=leftjoin(x, n, on = :file, makeunique=true)
+    x = leftjoin(a, c, on = :file)
+    df = leftjoin(x, n, on = :file, makeunique = true)
 
     # location, f, box
     @transform!(df, @byrow :location = split(split(:file, "/")[2], "-")[1])
     @transform!(df, @byrow :f = split(split(:file, "/")[2], "-")[5] * ".WAV")
-    @transform!(df, @byrow :box = "[$(split(split(:file, "/")[2], "-")[end-1]), $(chop(split(split(:file, "/")[2], "-")[end], tail=4))]" )
+    @transform!(
+        df,
+        @byrow :box = "[$(split(split(:file, "/")[2], "-")[end-1]), $(chop(split(split(:file, "/")[2], "-")[end], tail=4))]"
+    )
 
     # male, female, duet, not
     @transform!(df, @byrow @passmissing :male = split(:file, "/")[1] == "M" ? true : false)
-    @transform!(df, @byrow @passmissing :female = split(:file, "/")[1] == "F" ? true : false)
+    @transform!(
+        df,
+        @byrow @passmissing :female = split(:file, "/")[1] == "F" ? true : false
+    )
     @transform!(df, @byrow @passmissing :duet = split(:file, "/")[1] == "D" ? true : false)
-    @transform!(df, @byrow @passmissing :not_kiwi = split(:file, "/")[1] in ["KA", "KE", "N", "Q"] ? true : false)
+    @transform!(
+        df,
+        @byrow @passmissing :not_kiwi =
+            split(:file, "/")[1] in ["KA", "KE", "N", "Q"] ? true : false
+    )
 
     # other_label
-    @transform!(df, @byrow @passmissing :other_label = split(:file, "/")[1] in ["KA", "KE", "Q"] ? split(:file, "/")[1] : missing)
+    @transform!(
+        df,
+        @byrow @passmissing :other_label =
+            split(:file, "/")[1] in ["KA", "KE", "Q"] ? split(:file, "/")[1] : missing
+    )
 
     # distance
     @transform!(df, @byrow @passmissing :close_call = :distance == "C" ? true : false)
     @transform!(df, @byrow @passmissing :ok_call = :distance == "O" ? true : false)
     @transform!(df, @byrow @passmissing :far_call = :distance == "F" ? true : false)
-    
+
     # noise
     @transform!(df, @byrow @passmissing :low_noise = :noise == "L" ? true : false)
     @transform!(df, @byrow @passmissing :medium_noise = :noise == "M" ? true : false)
     @transform!(df, @byrow @passmissing :high_noise = :noise == "H" ? true : false)
     @transform!(df, @byrow @passmissing :terrible_noise = :noise == "T" ? true : false)
-    
+
     # remove unwanted cols, rename f to file
     select!(df, Not([:file, :distance, :noise]))
     rename!(df, :f => :file)

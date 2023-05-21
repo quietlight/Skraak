@@ -2,22 +2,7 @@
 
 module Utility
 
-using   CSV,
-        DataFrames, 
-        Dates,
-        DBInterface,
-        DSP
-        DuckDB,
-        Glob,
-        HTTP,
-        Images,
-        JSON,
-        Plots,
-        Random,
-        SHA,
-        TimeZones,
-        WAV,
-        XMLDict
+using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON, Plots, Random, SHA, TimeZones, WAV, XMLDict
 """
 Utility submodules:
     back_one_hour!
@@ -30,8 +15,14 @@ Utility submodules:
     utc_to_nzdt!
 """
 
-export back_one_hour!, check_png_wav_both_present, construct_dawn_dusk_dict, file_metadata_to_df, night, resize_image!, twilight_tuple_local_time, utc_to_nzdt!
-
+export back_one_hour!,
+    check_png_wav_both_present,
+    construct_dawn_dusk_dict,
+    file_metadata_to_df,
+    night,
+    resize_image!,
+    twilight_tuple_local_time,
+    utc_to_nzdt!
 
 """
 audiodata_db(df::DataFrame, table::String)
@@ -57,7 +48,6 @@ function audiodata_db(df::DataFrame, table::String)
     DBInterface.close!(con)
 end
 
-
 """
 Takes dawn dusk.csv and returns a dict to be consumeed by night().
 ~/dawn_dusk.csv
@@ -77,7 +67,6 @@ function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTi
     return y
 end
 
-
 """
 night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
 
@@ -96,7 +85,6 @@ function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::
         return false
     end
 end
-
 
 """
 file_metadata_to_df()
@@ -139,7 +127,7 @@ function file_metadata_to_df()
         battery = Float64[],
         temperature = Float64[],
         sha2_256 = String[],
-        night = Bool[]
+        night = Bool[],
     )
 
     #Get WAV list for folder
@@ -292,7 +280,7 @@ function file_metadata_to_df()
             battery,
             temperature,
             sha2_256,
-            nt
+            nt,
         ]
         push!(df, row)
 
@@ -300,7 +288,6 @@ function file_metadata_to_df()
     end
     return df
 end
-
 
 """
 twilight_tuple_local_time(dt::Date)
@@ -343,24 +330,36 @@ function twilight_tuple_local_time(dt::Date)
 end
 
 #use  this function to get a date range of data, saves to csv in cwd and  returns df  
-function twilight_tuple_local_time(dr::StepRange{Date, Day})
+function twilight_tuple_local_time(dr::StepRange{Date,Day})
     # C05 co-ordinates hard coded into function
-    cols = ["day","solar_noon","sunrise","day_length","sunset","civil_twilight_end","astronomical_twilight_end","astronomical_twilight_begin","nautical_twilight_begin" ,"civil_twilight_begin","nautical_twilight_end"]
-    df = DataFrame([ name =>[] for name in cols]) 
+    cols = [
+        "day",
+        "solar_noon",
+        "sunrise",
+        "day_length",
+        "sunset",
+        "civil_twilight_end",
+        "astronomical_twilight_end",
+        "astronomical_twilight_begin",
+        "nautical_twilight_begin",
+        "civil_twilight_begin",
+        "nautical_twilight_end",
+    ]
+    df = DataFrame([name => [] for name in cols])
     for day in dr
-        resp = HTTP.get("https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$day&formatted=0",) |>
-            x -> String(x.body) |> 
-            JSON.Parser.parse |>
-            x -> get(x, "results", "missing")
+        resp =
+            HTTP.get(
+                "https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$day&formatted=0",
+            ) |>
+            x -> String(x.body) |> JSON.Parser.parse |> x -> get(x, "results", "missing")
         resp["day"] = string(day)
         push!(df, resp)
         print("$day  ")
         sleep(3)
-    end   
-    CSV.write("sunrise_sunset.csv", df)    
+    end
+    CSV.write("sunrise_sunset.csv", df)
     return df
 end
-
 
 """
 utc_to_nzdt!files::Vector{String})
@@ -380,7 +379,7 @@ end
 
 using Dates, TimeZones
 """
-function utc_to_nzdt!files::Vector{String})
+function utc_to_nzdt!(files::Vector{String})
     fix_extension_of_files = []
     for old_file in files
         a = chop(old_file, tail = 4)
@@ -398,7 +397,9 @@ function utc_to_nzdt!files::Vector{String})
         # Must drop the WAV extension to avoiding force=true 
         # with  mv, since  the new file name may already exist and mv
         # will stacktrace leaving a big mess to tidy up.
-        isfile(Dates.format(new_date, "yyyymmdd_HHMMSS") * ".tmp") ? base_file = Dates.format((new_date + Dates.Second(1)), "yyyymmdd_HHMMSS") : base_file = Dates.format(new_date, "yyyymmdd_HHMMSS")
+        isfile(Dates.format(new_date, "yyyymmdd_HHMMSS") * ".tmp") ?
+        base_file = Dates.format((new_date + Dates.Second(1)), "yyyymmdd_HHMMSS") :
+        base_file = Dates.format(new_date, "yyyymmdd_HHMMSS")
         temp_file = base_file * ".tmp"
 
         # Tuple to tidy extensions later
@@ -414,8 +415,7 @@ function utc_to_nzdt!files::Vector{String})
     print("Tidy\n")
 end
 
-
-""" 
+"""
 back_one_hour!(files::Vector{String})
 
 This function takes a vector of file paths and renames each file in the
@@ -428,9 +428,9 @@ and mv will stacktrace leaving a big mess to tidy up.
 Args:
 
 •  files (Vector{String}): A vector of strings where each element is
-   a path to a file.
+a path to a file.
 
-Returns: Nothing - This function only renames files and saves them. 
+Returns: Nothing - This function only renames files and saves them.
 
 I use this to turn the clock back at the end of daylight saving.
 """
@@ -449,7 +449,7 @@ function back_one_hour!(files::Vector{String})
         se = parse(Int64, t[5:6])
 
         dt = DateTime(ye, mo, da, ho, mi, se)
-        
+
         new_date = dt - Dates.Hour(1)
         # Must drop the WAV extension to avoiding force=true 
         # with  mv, since  the new file name may already exist and mv
@@ -470,8 +470,7 @@ function back_one_hour!(files::Vector{String})
     print("Tidy\n")
 end
 
-
-""" 
+"""
 resize_image!(name::String, x::Int64=224, y::Int64=224)
 
 This function resizes an image with a specified name to a smaller size with
@@ -481,34 +480,32 @@ is common for image classification models.
 Args:
 
 •  name (String): A string representing the name and path of the
-   image file that needs to be resized.
+image file that needs to be resized.
 
 •  x (Int64): An integer representing the desired width of the
-   resized image. Default is set to 224.
+resized image. Default is set to 224.
 
 •  y (Int64): An integer representing the desired height of the
-   resized image. Default is set to 224.
+resized image. Default is set to 224.
 
 Returns: Nothing - This function only resizes the image and saves it to the
 same path.
 
 Use it like this:
-    using Images, Glob
-    a=glob("*/*.png")
-    for file in a
-        resize_image!(file)
-    end
-
-works really fast
-
-"""
-function resize_image!(name::String, x::Int64=224, y::Int64=224)
-        small_image = imresize(load(name), (x, y))
-        save(name, small_image)
+using Images, Glob
+a=glob("*/*.png")
+for file in a
+resize_image!(file)
 end
 
+works really fast
+"""
+function resize_image!(name::String, x::Int64 = 224, y::Int64 = 224)
+    small_image = imresize(load(name), (x, y))
+    save(name, small_image)
+end
 
-""" 
+"""
 check_png_wav_both_present(folders::Vector{String})
 
 Given a vector of folder paths, this function checks whether each folder
@@ -519,21 +516,20 @@ the .wav file is missing.
 Args:
 
 •  folders (Vector{String}): A vector of strings where each element
-   is a path to a directory.
+is a path to a directory.
 
-Returns: Nothing - This function only prints messages to the console. 
+Returns: Nothing - This function only prints messages to the console.
 """
 function check_png_wav_both_present(folders::Vector{String})
     println("No matching wav: ")
     for folder in folders
         println(folder)
-        p=glob("$folder/*.png")
+        p = glob("$folder/*.png")
         for png in p
-            !isfile(chop(png, tail=3)*"wav") && println(png)
+            !isfile(chop(png, tail = 3) * "wav") && println(png)
         end
     end
 end
-
 
 #=
 make dataset for image model
@@ -556,7 +552,6 @@ c = DataFrame(CSV.File("/media/david/USB/SecondaryModel_COF/close.csv"))
 @transform!(c, @byrow :drive=get_drive_and_trip_date(:location, :file)[1])
 CSV.write("/media/david/USB/SecondaryModel_COF/close.csv", c)
 
-
 #get trip date
 function get_td(drive, location, file)
        a=glob("$drive/$drive/$location/*/$file")
@@ -572,11 +567,9 @@ f = DataFrame(CSV.File("/media/david/USB/images_model/P_Female.csv"))
 @transform!(f, @byrow :trip_date=get_td(:drive, :location, :file))
 CSV.write("/media/david/USB/P_Female.csv", f)
 
-
 d = DataFrame(CSV.File("/media/david/USB/images_model/P_Duet.csv"))
 @transform!(d, @byrow :trip_date=get_td(:drive, :location, :file))
 CSV.write("/media/david/USB/P_Duet.csv", d)
-
 
 files=glob("*.csv")
 dfs = DataFrame.(CSV.File.(files))
@@ -590,22 +583,22 @@ CSV.write("/media/david/USB/Aggregate.csv", df)
 df2=df[4421:4521, :]
 =#
 
-
 """
 img_dataset(df::DataFrame)
 
 Takes a dataframe and makes png spectro images for secondary classifier.
 Should be run from /media/david
 
-
 using DSP, Plots, WAV, DataFrames, CSV, Glob
-
 """
 function img_dataset(df::DataFrame)
     for row in eachrow(df)
-        signal, freq = wavread("$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)")
+        signal, freq = wavread(
+            "$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)",
+        )
         row.box[1] * freq > 1 ? st = floor(Int, (row.box[1] * freq)) : st = 1
-        row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) : en = length(signal)
+        row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) :
+        en = length(signal)
         sample = signal[Int(st):Int(en)]
         name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
         outfile = "/home/david/ImageSet/$(row.label)/$name"
@@ -617,18 +610,16 @@ function img_dataset(df::DataFrame)
             S.time,
             S.freq,
             pow2db.(S.power),
-            size=(448,448),
-            showaxis=false,
-            ticks=false,
-            legend=false,
-            thickness_scaling=0,
+            size = (448, 448),
+            showaxis = false,
+            ticks = false,
+            legend = false,
+            thickness_scaling = 0,
         )
         savefig(outfile)
         print(".")
     end
     println("done")
 end
-
-
 
 end # module

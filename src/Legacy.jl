@@ -14,7 +14,6 @@ Legacy submodules:
     mutate_call_type (not  exported)
 """
 
-
 """
 airtable_buckets(dataframe)
 
@@ -74,7 +73,6 @@ function airtable_buckets(dataframe)
         close(io)
     end
 end
-
 
 """
 json(csv_file::String)
@@ -150,19 +148,18 @@ function json(csv_file::String)
     println("\ndone")
 end
 
-
 """
 dataset()
 
-This function takes a csv file in a folder and generates a dataset 
-from a vector of labels. 
+This function takes a csv file in a folder and generates a dataset
+from a vector of labels.
 
 It is intended to be used for Male, Female, Close as it is correcting older annotations as it goes.
 
 It works on CSV's from hand labelled AvianNZ style JSON.
 
-It saves  wav files to /media/david/T7/TrainingData/2021-02-03_MFC/AudioData/  
-and annotation files to a seperate directory as raven files. (it would be 
+It saves  wav files to /media/david/T7/TrainingData/2021-02-03_MFC/AudioData/
+and annotation files to a seperate directory as raven files. (it would be
 better for me to just build the csv direct, soon.)
 
 NOTE: change the destination directory manually as required.
@@ -899,27 +896,33 @@ function clip(file::String)
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(file, "/")
     data = DataFrame(CSV.File(file))
-    
+
     if !("file" in names(data))
         println("\nNo Detections at $location/$trip_date \n")
-        return 
+        return
     elseif "1.0" in names(data)
-        rename!(data, :"1.0" => :present)    
+        rename!(data, :"1.0" => :present)
     end
-    
+
     if length(data.file[1]) > 19
         @transform!(
             data,
             @byrow :DateTime =
                 DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
-                )
-    # To handle DOC recorders
+        )
+        # To handle DOC recorders
     else
         @transform!(
             data,
-            @byrow :DateTime =
-                DateTime((chop(:file, head = 2, tail = 4)[1:4] * "20" * chop(:file, head = 2, tail = 4)[5:end]), dateformat"ddmmyyyy_HHMMSS")
-                )
+            @byrow :DateTime = DateTime(
+                (
+                    chop(:file, head = 2, tail = 4)[1:4] *
+                    "20" *
+                    chop(:file, head = 2, tail = 4)[5:end]
+                ),
+                dateformat"ddmmyyyy_HHMMSS",
+            )
+        )
     end
 
     gdf = groupby(data, :present)
@@ -927,18 +930,12 @@ function clip(file::String)
         pres = gdf[(present = 1,)]
     else
         println("\nNo Detections at $location/$trip_date \n")
-        return 
+        return
     end
 
     dawn_dusk_dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
-    pres_night = @subset(
-        pres,
-        @byrow night(
-            :DateTime,
-            dawn_dusk_dict,
-        )
-    )
-     
+    pres_night = @subset(pres, @byrow night(:DateTime, dawn_dusk_dict))
+
     files = groupby(pres_night, :file)
     airtable = DataFrame(
         FileName = String[],
@@ -992,21 +989,21 @@ function clip(file::String)
                     S.time,
                     S.freq,
                     pow2db.(S.power),
-                    size=(448,448),
-                    showaxis=false,
-                    ticks=false,
-                    legend=false,
-                    thickness_scaling=0,
+                    size = (448, 448),
+                    showaxis = false,
+                    ticks = false,
+                    legend = false,
+                    thickness_scaling = 0,
                 )
-#=
-                heatmap(
-                    S.time,
-                    S.freq,
-                    pow2db.(S.power),
-                    xguide = "Time [s]",
-                    yguide = "Frequency [Hz]",
-                )
-=#
+                #=
+                                heatmap(
+                                    S.time,
+                                    S.freq,
+                                    pow2db.(S.power),
+                                    xguide = "Time [s]",
+                                    yguide = "Frequency [Hz]",
+                                )
+                =#
                 savefig(outfile)
                 #push to to airtable df
                 push!(
@@ -1031,6 +1028,5 @@ function clip(file::String)
     println("\ndone $location/$trip_date \n")
     #return airtable (no longer needed as not using airtable anymore)
 end
-
 
 end # module
