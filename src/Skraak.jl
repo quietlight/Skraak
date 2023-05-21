@@ -19,7 +19,6 @@ using   CSV,
         DataFrames,
         DataFramesMeta,
         Dates,
-        DelimitedFiles,
         DSP,
         Glob,
         HTTP,
@@ -35,18 +34,15 @@ clip()
 
 This function takes a preds.csv files and generates
 file names, wav's, spectrograms etc to be reviewed.
-It returns a dataframe which can be piped into airtable_buckets()
 it calls night() therefore night() must be available.
 
 It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
 It saves  wav and png files to /home/david/Upload/
-It returns a dataframe to be piped into airtable_buckets()
-!!!now saves a csv instead
 
 using Glob, Skraak
 predictions = glob("path/to/preds*")
 for file in predictions
-CSVto.clip(file)
+	clip(file)
 end
 
 if needed to change headers in preds csv
@@ -91,24 +87,15 @@ function clip(file::String)
         println("\nNo Detections at $location/$trip_date \n")
         return 
     end
+
     dawn_dusk_dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
     pres_night = @subset(
         pres,
-        @byrow night(
-            :DateTime,
-            dawn_dusk_dict,
-        )
-    ) 
+        @byrow night(:DateTime, dawn_dusk_dict)
+    	)
+
     files = groupby(pres_night, :file)
-    airtable = DataFrame(
-        FileName = String[],
-        Image = String[],
-        Audio = String[],
-        StartTime = DateTime[],
-        Length = Float64[],
-        Location = String[],
-        Trip = String[],
-    )
+    
     for (k, v) in pairs(files)
         file_start_time = v.DateTime[1]
         file_name = chop(v.file[1], head = 2, tail = 4)
@@ -158,38 +145,14 @@ function clip(file::String)
                     legend=false,
                     thickness_scaling=0,
                 )
-#=
-                heatmap(
-                    S.time,
-                    S.freq,
-                    pow2db.(S.power),
-                    xguide = "Time [s]",
-                    yguide = "Frequency [Hz]",
-                )
-=#
+
                 savefig(outfile)
-                #push to to airtable df
-                push!(
-                    airtable,
-                    [
-                        name,
-                        "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.png",
-                        "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.wav",
-                        file_start_time,
-                        (en - st) / freq,
-                        location,
-                        trip_date,
-                    ],
-                )
+                
             end
         end
         print(".")
-        #println(k, v)
     end
-    # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my new finder tagging workflow
-    CSV.write("$location/$trip_date/segments-$location-$(string(today())).csv", airtable)
     println("\ndone $location/$trip_date \n")
-    #return airtable (no longer needed as not using airtable anymore)
 end
 
 

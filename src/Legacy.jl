@@ -868,6 +868,169 @@ function mutate_call_type()
     end
 end
 
+"""
+clip()
+
+This function takes a preds.csv files and generates
+file names, wav's, spectrograms etc to be reviewed.
+It returns a dataframe which can be piped into airtable_buckets()
+it calls night() therefore night() must be available.
+
+It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
+It saves  wav and png files to /home/david/Upload/
+It returns a dataframe to be piped into airtable_buckets()
+!!!now saves a csv instead
+
+using Glob, Skraak
+predictions = glob("path/to/preds*")
+for file in predictions
+CSVto.clip(file)
+end
+
+if needed to change headers in preds csv
+shift, control, f in subl
+file,start_time,end_time,0.0,1.0
+/media/david/Pomona-2,<project filters>, preds-2023-02-27.csv
+file,start_time,end_time,absent,present
+
+using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
+"""
+function clip(file::String)
+    # Assumes function run from Pomona-1 or Pomona-2
+    location, trip_date, _ = split(file, "/")
+    data = DataFrame(CSV.File(file))
+    
+    if !("file" in names(data))
+        println("\nNo Detections at $location/$trip_date \n")
+        return 
+    elseif "1.0" in names(data)
+        rename!(data, :"1.0" => :present)    
+    end
+    
+    if length(data.file[1]) > 19
+        @transform!(
+            data,
+            @byrow :DateTime =
+                DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
+                )
+    # To handle DOC recorders
+    else
+        @transform!(
+            data,
+            @byrow :DateTime =
+                DateTime((chop(:file, head = 2, tail = 4)[1:4] * "20" * chop(:file, head = 2, tail = 4)[5:end]), dateformat"ddmmyyyy_HHMMSS")
+                )
+    end
+
+    gdf = groupby(data, :present)
+    if (present = 1,) in keys(gdf)
+        pres = gdf[(present = 1,)]
+    else
+        println("\nNo Detections at $location/$trip_date \n")
+        return 
+    end
+
+    dawn_dusk_dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+    pres_night = @subset(
+        pres,
+        @byrow night(
+            :DateTime,
+            dawn_dusk_dict,
+        )
+    )
+     
+    files = groupby(pres_night, :file)
+    airtable = DataFrame(
+        FileName = String[],
+        Image = String[],
+        Audio = String[],
+        StartTime = DateTime[],
+        Length = Float64[],
+        Location = String[],
+        Trip = String[],
+    )
+    for (k, v) in pairs(files)
+        file_start_time = v.DateTime[1]
+        file_name = chop(v.file[1], head = 2, tail = 4)
+        x = v[!, :start_time]
+        sort!(x)
+        s = []
+        t = []
+        for time in x
+            if length(t) == 0
+                push!(t, time)
+            elseif time - last(t) <= 15.0
+                push!(t, time)
+            else
+                push!(s, copy(t))
+                deleteat!(t, 1:length(t))
+                push!(t, time)
+            end
+        end
+        push!(s, copy(t))
+        deleteat!(t, 1:length(t))
+        detections = filter(x -> length(x) > 1, s)
+        #println(file_name, file_start_time, detections)
+        if length(detections) > 0
+            #load file
+            signal, freq = wavread("$location/$trip_date/$file_name.WAV")
+            for detection in detections
+                #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
+                first(detection) > 0 ? st = first(detection) * freq : st = 1
+                (last(detection) + 5.0) * freq <= length(signal) ?
+                en = (last(detection) + 5.0) * freq : en = length(signal)
+                sample = signal[Int(st):Int(en)]
+                name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
+                outfile = "/home/david/Upload/$name"
+                #write a wav file
+                wavwrite(sample, "$outfile.wav", Fs = Int(freq))
+                #spectrogram
+                n = 400
+                fs = convert(Int, freq)
+                S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
+                heatmap(
+                    S.time,
+                    S.freq,
+                    pow2db.(S.power),
+                    size=(448,448),
+                    showaxis=false,
+                    ticks=false,
+                    legend=false,
+                    thickness_scaling=0,
+                )
+#=
+                heatmap(
+                    S.time,
+                    S.freq,
+                    pow2db.(S.power),
+                    xguide = "Time [s]",
+                    yguide = "Frequency [Hz]",
+                )
+=#
+                savefig(outfile)
+                #push to to airtable df
+                push!(
+                    airtable,
+                    [
+                        name,
+                        "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.png",
+                        "https://label-pomona.s3-ap-southeast-2.amazonaws.com/$name.wav",
+                        file_start_time,
+                        (en - st) / freq,
+                        location,
+                        trip_date,
+                    ],
+                )
+            end
+        end
+        print(".")
+        #println(k, v)
+    end
+    # new bit to write a csv instead of return a dataframe to be bucketed into json for airtable. I can simplify the shape of the dataframe too sometime, all i need are the files for my new finder tagging workflow
+    CSV.write("$location/$trip_date/segments-$location-$(string(today())).csv", airtable)
+    println("\ndone $location/$trip_date \n")
+    #return airtable (no longer needed as not using airtable anymore)
+end
 
 
 end # module
