@@ -1,24 +1,15 @@
 # Utility.jl
 
-module Utility
+#module Utility
 
 using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON, Plots, Random, SHA, TimeZones, WAV, XMLDict
-"""
-Utility submodules:
-    back_one_hour!
-    check_png_wav_both_present
-    construct_dawn_dusk_dict
-    file_metadata_to_df
-    night
-    resize_image!
-	twilight_tuple_local_time
-    utc_to_nzdt!
-"""
 
-export back_one_hour!,
+export audiodata_db,
+    back_one_hour!,
     check_png_wav_both_present,
     construct_dawn_dusk_dict,
     file_metadata_to_df,
+    img_dataset,
     night,
     resize_image!,
     twilight_tuple_local_time,
@@ -33,8 +24,8 @@ using DataFrames, DBInterface, DuckDB, Random
 """
 function audiodata_db(df::DataFrame, table::String)
     temp_name = randstring(6)
-    con = DBInterface.connect(DuckDB.DB, "/media/david/USB/AudioData.db")
-    #con = DBInterface.connect(DuckDB.DB, "/Users/davidcary/Desktop/AudioData.db")
+    con = DBInterface.connect(DuckDB.DB, "/media/david/SSD1/AudioData.db")
+    #con = DBInterface.connect(DuckDB.DB, "/Volumes/SSD1/AudioData.db")
     DuckDB.register_data_frame(con, df, temp_name)
     DBInterface.execute(
         con,
@@ -49,6 +40,65 @@ function audiodata_db(df::DataFrame, table::String)
 end
 
 """
+back_one_hour!(files::Vector{String})
+
+This function takes a vector of file paths and renames each file in the
+vector by changing the name of the file to the name of the file created one
+hour before the original file. The new name format is yyyymmdd_HHMMSS.tmp,
+which represents the time stamp of the original file minus one hour. This
+function avoids force=true with mv, since new file names may already exist
+and mv will stacktrace leaving a big mess to tidy up.
+
+Args:
+
+•  files (Vector{String}): A vector of strings where each element is
+a path to a file.
+
+Returns: Nothing - This function only renames files and saves them.
+
+I use this to turn the clock back at the end of daylight saving.
+"""
+function back_one_hour!(files::Vector{String})
+    fix_extension_of_files = []
+    for old_file in files
+        # Extract the date and time of the original file using string chopping
+        a = chop(old_file, tail = 4)
+        d, t = split(a, "_")
+
+        ye = parse(Int64, d[1:4])
+        mo = parse(Int64, d[5:6])
+        da = parse(Int64, d[7:8])
+        ho = parse(Int64, t[1:2])
+        mi = parse(Int64, t[3:4])
+        se = parse(Int64, t[5:6])
+
+        dt = DateTime(ye, mo, da, ho, mi, se)
+
+        new_date = dt - Dates.Hour(1)
+        # Must drop the WAV extension to avoiding force=true 
+        # with  mv, since  the new file name may already exist and mv
+        # will stacktrace leaving a big mess to tidy up.
+        base_file = Dates.format(new_date, "yyyymmdd_HHMMSS")
+        temp_file = base_file * ".tmp"
+
+        # Tuple to tidy extensions later
+        tidy = (temp_file, base_file * ".WAV")
+
+        mv(old_file, temp_file)
+        push!(fix_extension_of_files, tidy)
+        print(".")
+    end
+    for item in fix_extension_of_files
+        mv(item[1], item[2])
+    end
+    print("Tidy\n")
+end
+
+
+"""
+construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
+    sun = DataFrame(CSV.File(file))
+
 Takes dawn dusk.csv and returns a dict to be consumeed by night().
 ~/dawn_dusk.csv
 At present it goes from the start of 2019 to the end of 2024
@@ -68,21 +118,28 @@ function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTi
 end
 
 """
-night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
+check_png_wav_both_present(folders::Vector{String})
 
-Returns true if time is at night, ie between civil twilights, dusk to dawn.
-Consumes dict from construct_dawn_dusk_dict
+Given a vector of folder paths, this function checks whether each folder
+contains a matching .png and .wav file. If a folder does not contain a
+matching .wav file, a message is printed to indicate the folder path where
+the .wav file is missing.
 
-time=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
-Utility.night(time, dict)
+Args:
+
+•  folders (Vector{String}): A vector of strings where each element
+is a path to a directory.
+
+Returns: Nothing - This function only prints messages to the console.
 """
-function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
-    dawn = dict[Date(call_time)][1]
-    dusk = dict[Date(call_time)][2]
-    if call_time <= dawn || call_time >= dusk
-        return true
-    else
-        return false
+function check_png_wav_both_present(folders::Vector{String})
+    println("No matching wav: ")
+    for folder in folders
+        println(folder)
+        p = glob("$folder/*.png")
+        for png in p
+            !isfile(chop(png, tail = 3) * "wav") && println(png)
+        end
     end
 end
 
@@ -289,6 +346,152 @@ function file_metadata_to_df()
     return df
 end
 
+#=
+make dataset for image model
+drive   location    trip_date   file    box     label
+
+using CSV, DataFrames, DataFramesMeta, Glob
+
+m = DataFrame(CSV.File("/media/david/USB/images_model/P_Male.csv"))
+
+#run from media/david
+function get_drive_and_trip_date(location, file)
+    a=glob("Pomona-*/Pomona-*/$location/*/$file")
+    length(a) > 0 ? b=split(a[1], "/") : b=missing
+    return b
+end
+
+c = DataFrame(CSV.File("/media/david/USB/SecondaryModel_COF/close.csv"))
+#note: dropmissing!(df) or @transform df @byrow @passmissing or delete rows that dont work
+@transform!(c, @byrow :trip_date=get_drive_and_trip_date(:location, :file)[4])
+@transform!(c, @byrow :drive=get_drive_and_trip_date(:location, :file)[1])
+CSV.write("/media/david/USB/SecondaryModel_COF/close.csv", c)
+
+#get trip date
+function get_td(drive, location, file)
+       a=glob("$drive/$drive/$location/*/$file")
+       length(a) > 0 ? b=split(a[1], "/")[end-1] : b=missing
+       return b
+       end
+
+@transform!(m, @byrow :trip_date=get_td(:drive, :location, :file))
+
+CSV.write("/media/david/USB/P_Male.csv", m)
+
+f = DataFrame(CSV.File("/media/david/USB/images_model/P_Female.csv"))
+@transform!(f, @byrow :trip_date=get_td(:drive, :location, :file))
+CSV.write("/media/david/USB/P_Female.csv", f)
+
+d = DataFrame(CSV.File("/media/david/USB/images_model/P_Duet.csv"))
+@transform!(d, @byrow :trip_date=get_td(:drive, :location, :file))
+CSV.write("/media/david/USB/P_Duet.csv", d)
+
+files=glob("*.csv")
+dfs = DataFrame.(CSV.File.(files))
+df = reduce(vcat, dfs)
+x=eval.(Meta.parse.(df.box)) 
+df.box = x
+sort!(df)
+;cd /media/david
+CSV.write("/media/david/USB/Aggregate.csv", df)
+
+df2=df[4421:4521, :]
+=#
+
+"""
+img_dataset(df::DataFrame)
+
+Takes a dataframe and makes png spectro images for secondary classifier.
+Should be run from /media/david
+
+using DSP, Plots, WAV, DataFrames, CSV, Glob
+"""
+function img_dataset(df::DataFrame)
+    for row in eachrow(df)
+        signal, freq = wavread(
+            "$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)",
+        )
+        row.box[1] * freq > 1 ? st = floor(Int, (row.box[1] * freq)) : st = 1
+        row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) :
+        en = length(signal)
+        sample = signal[Int(st):Int(en)]
+        name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
+        outfile = "/home/david/ImageSet/$(row.label)/$name"
+        #spectrogram
+        n = 400
+        fs = convert(Int, freq)
+        S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
+        heatmap(
+            S.time,
+            S.freq,
+            pow2db.(S.power),
+            size = (448, 448),
+            showaxis = false,
+            ticks = false,
+            legend = false,
+            thickness_scaling = 0,
+        )
+        savefig(outfile)
+        print(".")
+    end
+    println("done")
+end
+
+"""
+night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
+
+Returns true if time is at night, ie between civil twilights, dusk to dawn.
+Consumes dict from construct_dawn_dusk_dict
+
+time=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
+Utility.night(time, dict)
+"""
+function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
+    dawn = dict[Date(call_time)][1]
+    dusk = dict[Date(call_time)][2]
+    if call_time <= dawn || call_time >= dusk
+        return true
+    else
+        return false
+    end
+end
+
+
+"""
+resize_image!(name::String, x::Int64=224, y::Int64=224)
+
+This function resizes an image with a specified name to a smaller size with
+dimensions x and y. By default, the dimensions are set to 224 x 224, which
+is common for image classification models.
+
+Args:
+
+•  name (String): A string representing the name and path of the
+image file that needs to be resized.
+
+•  x (Int64): An integer representing the desired width of the
+resized image. Default is set to 224.
+
+•  y (Int64): An integer representing the desired height of the
+resized image. Default is set to 224.
+
+Returns: Nothing - This function only resizes the image and saves it to the
+same path.
+
+Use it like this:
+using Images, Glob
+a=glob("*/*.png")
+for file in a
+resize_image!(file)
+end
+
+works really fast
+"""
+function resize_image!(name::String, x::Int64 = 224, y::Int64 = 224)
+    small_image = imresize(load(name), (x, y))
+    save(name, small_image)
+end
+
 """
 twilight_tuple_local_time(dt::Date)
 
@@ -415,211 +618,7 @@ function utc_to_nzdt!(files::Vector{String})
     print("Tidy\n")
 end
 
-"""
-back_one_hour!(files::Vector{String})
 
-This function takes a vector of file paths and renames each file in the
-vector by changing the name of the file to the name of the file created one
-hour before the original file. The new name format is yyyymmdd_HHMMSS.tmp,
-which represents the time stamp of the original file minus one hour. This
-function avoids force=true with mv, since new file names may already exist
-and mv will stacktrace leaving a big mess to tidy up.
 
-Args:
 
-•  files (Vector{String}): A vector of strings where each element is
-a path to a file.
-
-Returns: Nothing - This function only renames files and saves them.
-
-I use this to turn the clock back at the end of daylight saving.
-"""
-function back_one_hour!(files::Vector{String})
-    fix_extension_of_files = []
-    for old_file in files
-        # Extract the date and time of the original file using string chopping
-        a = chop(old_file, tail = 4)
-        d, t = split(a, "_")
-
-        ye = parse(Int64, d[1:4])
-        mo = parse(Int64, d[5:6])
-        da = parse(Int64, d[7:8])
-        ho = parse(Int64, t[1:2])
-        mi = parse(Int64, t[3:4])
-        se = parse(Int64, t[5:6])
-
-        dt = DateTime(ye, mo, da, ho, mi, se)
-
-        new_date = dt - Dates.Hour(1)
-        # Must drop the WAV extension to avoiding force=true 
-        # with  mv, since  the new file name may already exist and mv
-        # will stacktrace leaving a big mess to tidy up.
-        base_file = Dates.format(new_date, "yyyymmdd_HHMMSS")
-        temp_file = base_file * ".tmp"
-
-        # Tuple to tidy extensions later
-        tidy = (temp_file, base_file * ".WAV")
-
-        mv(old_file, temp_file)
-        push!(fix_extension_of_files, tidy)
-        print(".")
-    end
-    for item in fix_extension_of_files
-        mv(item[1], item[2])
-    end
-    print("Tidy\n")
-end
-
-"""
-resize_image!(name::String, x::Int64=224, y::Int64=224)
-
-This function resizes an image with a specified name to a smaller size with
-dimensions x and y. By default, the dimensions are set to 224 x 224, which
-is common for image classification models.
-
-Args:
-
-•  name (String): A string representing the name and path of the
-image file that needs to be resized.
-
-•  x (Int64): An integer representing the desired width of the
-resized image. Default is set to 224.
-
-•  y (Int64): An integer representing the desired height of the
-resized image. Default is set to 224.
-
-Returns: Nothing - This function only resizes the image and saves it to the
-same path.
-
-Use it like this:
-using Images, Glob
-a=glob("*/*.png")
-for file in a
-resize_image!(file)
-end
-
-works really fast
-"""
-function resize_image!(name::String, x::Int64 = 224, y::Int64 = 224)
-    small_image = imresize(load(name), (x, y))
-    save(name, small_image)
-end
-
-"""
-check_png_wav_both_present(folders::Vector{String})
-
-Given a vector of folder paths, this function checks whether each folder
-contains a matching .png and .wav file. If a folder does not contain a
-matching .wav file, a message is printed to indicate the folder path where
-the .wav file is missing.
-
-Args:
-
-•  folders (Vector{String}): A vector of strings where each element
-is a path to a directory.
-
-Returns: Nothing - This function only prints messages to the console.
-"""
-function check_png_wav_both_present(folders::Vector{String})
-    println("No matching wav: ")
-    for folder in folders
-        println(folder)
-        p = glob("$folder/*.png")
-        for png in p
-            !isfile(chop(png, tail = 3) * "wav") && println(png)
-        end
-    end
-end
-
-#=
-make dataset for image model
-drive   location    trip_date   file    box     label
-
-using CSV, DataFrames, DataFramesMeta, Glob
-
-m = DataFrame(CSV.File("/media/david/USB/images_model/P_Male.csv"))
-
-#run from media/david
-function get_drive_and_trip_date(location, file)
-    a=glob("Pomona-*/Pomona-*/$location/*/$file")
-    length(a) > 0 ? b=split(a[1], "/") : b=missing
-    return b
-end
-
-c = DataFrame(CSV.File("/media/david/USB/SecondaryModel_COF/close.csv"))
-#note: dropmissing!(df) or @transform df @byrow @passmissing or delete rows that dont work
-@transform!(c, @byrow :trip_date=get_drive_and_trip_date(:location, :file)[4])
-@transform!(c, @byrow :drive=get_drive_and_trip_date(:location, :file)[1])
-CSV.write("/media/david/USB/SecondaryModel_COF/close.csv", c)
-
-#get trip date
-function get_td(drive, location, file)
-       a=glob("$drive/$drive/$location/*/$file")
-       length(a) > 0 ? b=split(a[1], "/")[end-1] : b=missing
-       return b
-       end
-
-@transform!(m, @byrow :trip_date=get_td(:drive, :location, :file))
-
-CSV.write("/media/david/USB/P_Male.csv", m)
-
-f = DataFrame(CSV.File("/media/david/USB/images_model/P_Female.csv"))
-@transform!(f, @byrow :trip_date=get_td(:drive, :location, :file))
-CSV.write("/media/david/USB/P_Female.csv", f)
-
-d = DataFrame(CSV.File("/media/david/USB/images_model/P_Duet.csv"))
-@transform!(d, @byrow :trip_date=get_td(:drive, :location, :file))
-CSV.write("/media/david/USB/P_Duet.csv", d)
-
-files=glob("*.csv")
-dfs = DataFrame.(CSV.File.(files))
-df = reduce(vcat, dfs)
-x=eval.(Meta.parse.(df.box)) 
-df.box = x
-sort!(df)
-;cd /media/david
-CSV.write("/media/david/USB/Aggregate.csv", df)
-
-df2=df[4421:4521, :]
-=#
-
-"""
-img_dataset(df::DataFrame)
-
-Takes a dataframe and makes png spectro images for secondary classifier.
-Should be run from /media/david
-
-using DSP, Plots, WAV, DataFrames, CSV, Glob
-"""
-function img_dataset(df::DataFrame)
-    for row in eachrow(df)
-        signal, freq = wavread(
-            "$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)",
-        )
-        row.box[1] * freq > 1 ? st = floor(Int, (row.box[1] * freq)) : st = 1
-        row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) :
-        en = length(signal)
-        sample = signal[Int(st):Int(en)]
-        name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
-        outfile = "/home/david/ImageSet/$(row.label)/$name"
-        #spectrogram
-        n = 400
-        fs = convert(Int, freq)
-        S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
-        heatmap(
-            S.time,
-            S.freq,
-            pow2db.(S.power),
-            size = (448, 448),
-            showaxis = false,
-            ticks = false,
-            legend = false,
-            thickness_scaling = 0,
-        )
-        savefig(outfile)
-        print(".")
-    end
-    println("done")
-end
-
-end # module
+#end # module
