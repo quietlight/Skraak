@@ -1,22 +1,40 @@
 module Skraak
 
-export aggregate_labels, clip, make_clips
+export  make_clips, aggregate_labels, audiodata_db
 
 include("Utility.jl")
 
-"""
-Skraak functions:
-    clip
-    dataset
-    aggreagte_labels
-
-
-	Utility
-	#Legacy#
-"""
-
 using CSV, DataFrames, DataFramesMeta, Dates, DSP, Glob, HTTP, JSON, Plots, Random, TimeZones, WAV
 
+"""
+make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
+
+This function takes a preds.csv files and generates
+file names, wav's, spectrograms etc to be reviewed.
+it calls night() and may call construct_dawn_dusk_dict() unless the dict is globally defined and passed in
+
+It should be run from Pomona-1/, Pomona-2/ or Pomona-3/, assumes it is, it uses the path
+It saves  wav and png files to /home/david/Upload/
+need to use a sry/catch because the 2 assert functions thow an error to short circuit the function
+
+using Glob, Skraak
+predictions = glob("path/to/preds*")
+for file in predictions
+    try
+        make_clips(file)
+    catch x
+        println(x)
+    end
+end
+
+if needed to change headers in preds csv
+shift, control, f in subl
+file,start_time,end_time,0.0,1.0
+/media/david/Pomona-2,<project filters>, preds-2023-02-27.csv
+file,start_time,end_time,absent,present
+
+using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
+"""
 function make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(preds_path, "/")
@@ -57,6 +75,8 @@ function make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{D
     end
     println("\ndone $location/$trip_date \n")
 end
+
+#######################################################################
 
 function assert_not_empty(df::DataFrame)::DataFrame
     size(df) != (0,0) ? (return df) : error("Empty dataframe at $preds_path")
@@ -138,140 +158,52 @@ function plot_spectrogram(sample::Vector{Float64}, freq::Float32)::Plots.Plot{Pl
     return plot
 end
 
+
 """
-clip()
+construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
+    sun = DataFrame(CSV.File(file))
 
-This function takes a preds.csv files and generates
-file names, wav's, spectrograms etc to be reviewed.
-it calls night() therefore night() must be available.
+Takes dawn dusk.csv and returns a dict to be consumeed by night().
+~/dawn_dusk.csv
+At present it goes from the start of 2019 to the end of 2024
+The csv contains local time sunrise and sunset
+I use this to decide if a file with a local time encoded name was recorded at night
 
-It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
-It saves  wav and png files to /home/david/Upload/
+dict = construct_dawn_dusk_dict("/Volumes/SSD1/dawn_dusk.csv")
+dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
 
-using Glob, Skraak
-predictions = glob("path/to/preds*")
-for file in predictions
-clip(file)
+using CSV, DataFrames
+"""
+function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
+    sun = DataFrame(CSV.File(file))
+    x = Tuple(zip(sun.Dawn, sun.Dusk))
+    y = Dict(zip(sun.Date, x))
+    return y
 end
 
-if needed to change headers in preds csv
-shift, control, f in subl
-file,start_time,end_time,0.0,1.0
-/media/david/Pomona-2,<project filters>, preds-2023-02-27.csv
-file,start_time,end_time,absent,present
-
-using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
-function clip(file::String)
-    # Assumes function run from Pomona-1 or Pomona-2
-    location, trip_date, _ = split(file, "/")
-    data = DataFrame(CSV.File(file))
+night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
 
-    if !("file" in names(data))
-        println("\nNo Detections at $location/$trip_date \n")
-        return
-    elseif "1.0" in names(data)
-        rename!(data, :"1.0" => :present)
-    end
+Returns true if time is at night, ie between civil twilights, dusk to dawn.
+Consumes dict from construct_dawn_dusk_dict
 
-    if length(data.file[1]) > 19
-        @transform!(
-            data,
-            @byrow :DateTime =
-                DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
-        )
-        # To handle DOC recorders
+time=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
+Utility.night(time, dict)
+"""
+function night(call_time::DateTime, dict::Dict{Date,Tuple{DateTime,DateTime}})::Bool
+    dawn = dict[Date(call_time)][1]
+    dusk = dict[Date(call_time)][2]
+    if call_time <= dawn || call_time >= dusk
+        return true
     else
-        @transform!(
-            data,
-            @byrow :DateTime = DateTime(
-                (
-                    chop(:file, head = 2, tail = 4)[1:4] *
-                    "20" *
-                    chop(:file, head = 2, tail = 4)[5:end]
-                ),
-                dateformat"ddmmyyyy_HHMMSS",
-            )
-        )
+        return false
     end
-
-    gdf = groupby(data, :present)
-    if (present = 1,) in keys(gdf)
-        pres = gdf[(present = 1,)]
-    else
-        println("\nNo Detections at $location/$trip_date \n")
-        return
-    end
-
-    dawn_dusk_dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
-    pres_night = @subset(pres, @byrow night(:DateTime, dawn_dusk_dict))
-
-    files = groupby(pres_night, :file)
-
-    for (k, v) in pairs(files)
-
-        file_start_time = v.DateTime[1]
-        file_name = chop(v.file[1], head = 2, tail = 4)
-        x = v[!, :start_time]
-        sort!(x)
-        s = []
-        t = []
-        for time in x
-            if length(t) == 0
-                push!(t, time)
-            elseif time - last(t) <= 15.0
-                push!(t, time)
-            else
-                push!(s, copy(t))
-                deleteat!(t, 1:length(t))
-                push!(t, time)
-            end
-        end
-        push!(s, copy(t))
-        deleteat!(t, 1:length(t))
-        detections = filter(x -> length(x) > 1, s)
-
-        #println(file_name, file_start_time, detections)
-        if length(detections) > 0
-            #load file
-            signal, freq = wavread("$location/$trip_date/$file_name.WAV")
-            for detection in detections
-                #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
-                first(detection) > 0 ? st = first(detection) * freq : st = 1
-                (last(detection) + 5.0) * freq <= length(signal) ?
-                en = (last(detection) + 5.0) * freq : en = length(signal)
-
-                sample = signal[Int(st):Int(en)]
-                name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
-                outfile = "/home/david/Upload/$name"
-                #write a wav file
-
-                wavwrite(sample, "$outfile.wav", Fs = Int(freq))
-
-                #spectrogram
-                n = 400
-                fs = convert(Int, freq)
-                S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
-                heatmap(
-                    S.time,
-                    S.freq,
-                    pow2db.(S.power),
-                    size = (448, 448),
-                    showaxis = false,
-                    ticks = false,
-                    legend = false,
-                    thickness_scaling = 0,
-                )
-
-                savefig(outfile)
-            end
-        end
-        print(".")
-    end
-    println("\ndone $location/$trip_date \n")
 end
+
+#######################################################################
 
 #INBETWEEN STEP: use secondary model to sort clips, move clips into D, F, M, N, and hand classify, classify into COF, Noise, geneerate csv's.
+
 
 """
 aggregate_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
@@ -295,6 +227,8 @@ This function prepares the csv output from my hand classification and secondary 
 assumes run from Clips_xxxx-xx-xx folder and that actual_mfdn.csv, predicted_cof.csv, predicted_noise.csv, and that
 assumes file names if not specified
 saves a csv and also returns a dataframe
+
+df=aggregate_labels()
 
 using CSV, DataFrames, DataFramesMeta
 """
@@ -360,5 +294,35 @@ function aggregate_labels(
     CSV.write(outfile, df)
     return df
 end
+
+"""
+audiodata_db(df::DataFrame, table::String)
+
+Use to upload labels to AudioData.duckdb
+
+Takes a dataframe and inserts into AudioData.db table.
+
+audiodata_db(df, "pomona_labels_20230405")
+
+using DataFrames, DBInterface, DuckDB, Random
+"""
+function audiodata_db(df::DataFrame, table::String)
+    temp_name = randstring(6)
+    con = DBInterface.connect(DuckDB.DB, "/media/david/SSD1/AudioData.duckdb")
+    #con = DBInterface.connect(DuckDB.DB, "/Volumes/SSD1/AudioData.duckdb")
+    DuckDB.register_data_frame(con, df, temp_name)
+    DBInterface.execute(
+        con,
+        """
+        INSERT
+        INTO $table
+        SELECT *
+        FROM '$temp_name'
+        """,
+    )
+    DBInterface.close!(con)
+end
+
+# Rebuild skraak.kiwi, watch out for rats unless there is neew up to date data there already
 
 end # module

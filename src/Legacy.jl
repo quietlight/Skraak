@@ -12,6 +12,7 @@ Legacy submodules:
     df_new_labels
     kiwi_csv
     mutate_call_type (not  exported)
+    clip
 """
 
 """
@@ -1027,6 +1028,139 @@ function clip(file::String)
     CSV.write("$location/$trip_date/segments-$location-$(string(today())).csv", airtable)
     println("\ndone $location/$trip_date \n")
     #return airtable (no longer needed as not using airtable anymore)
+end
+
+"""
+clip()
+
+This function takes a preds.csv files and generates
+file names, wav's, spectrograms etc to be reviewed.
+it calls night() therefore night() must be available.
+
+It should be run from Pomona-1/ or Pomona-2/, assumes it is, it uses the path
+It saves  wav and png files to /home/david/Upload/
+
+using Glob, Skraak
+predictions = glob("path/to/preds*")
+for file in predictions
+clip(file)
+end
+
+if needed to change headers in preds csv
+shift, control, f in subl
+file,start_time,end_time,0.0,1.0
+/media/david/Pomona-2,<project filters>, preds-2023-02-27.csv
+file,start_time,end_time,absent,present
+
+using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
+"""
+function clip(file::String)
+    # Assumes function run from Pomona-1 or Pomona-2
+    location, trip_date, _ = split(file, "/")
+    data = DataFrame(CSV.File(file))
+
+    if !("file" in names(data))
+        println("\nNo Detections at $location/$trip_date \n")
+        return
+    elseif "1.0" in names(data)
+        rename!(data, :"1.0" => :present)
+    end
+
+    if length(data.file[1]) > 19
+        @transform!(
+            data,
+            @byrow :DateTime =
+                DateTime(chop(:file, head = 2, tail = 4), dateformat"yyyymmdd_HHMMSS")
+        )
+        # To handle DOC recorders
+    else
+        @transform!(
+            data,
+            @byrow :DateTime = DateTime(
+                (
+                    chop(:file, head = 2, tail = 4)[1:4] *
+                    "20" *
+                    chop(:file, head = 2, tail = 4)[5:end]
+                ),
+                dateformat"ddmmyyyy_HHMMSS",
+            )
+        )
+    end
+
+    gdf = groupby(data, :present)
+    if (present = 1,) in keys(gdf)
+        pres = gdf[(present = 1,)]
+    else
+        println("\nNo Detections at $location/$trip_date \n")
+        return
+    end
+
+    dawn_dusk_dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+    pres_night = @subset(pres, @byrow night(:DateTime, dawn_dusk_dict))
+
+    files = groupby(pres_night, :file)
+
+    for (k, v) in pairs(files)
+
+        file_start_time = v.DateTime[1]
+        file_name = chop(v.file[1], head = 2, tail = 4)
+        x = v[!, :start_time]
+        sort!(x)
+        s = []
+        t = []
+        for time in x
+            if length(t) == 0
+                push!(t, time)
+            elseif time - last(t) <= 15.0
+                push!(t, time)
+            else
+                push!(s, copy(t))
+                deleteat!(t, 1:length(t))
+                push!(t, time)
+            end
+        end
+        push!(s, copy(t))
+        deleteat!(t, 1:length(t))
+        detections = filter(x -> length(x) > 1, s)
+
+        #println(file_name, file_start_time, detections)
+        if length(detections) > 0
+            #load file
+            signal, freq = wavread("$location/$trip_date/$file_name.WAV")
+            for detection in detections
+                #if the detection starts at start of the file I am cuttiing the first 0.1 seconds off.
+                first(detection) > 0 ? st = first(detection) * freq : st = 1
+                (last(detection) + 5.0) * freq <= length(signal) ?
+                en = (last(detection) + 5.0) * freq : en = length(signal)
+
+                sample = signal[Int(st):Int(en)]
+                name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
+                outfile = "/home/david/Upload/$name"
+                #write a wav file
+
+                wavwrite(sample, "$outfile.wav", Fs = Int(freq))
+
+                #spectrogram
+                n = 400
+                fs = convert(Int, freq)
+                S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
+                heatmap(
+                    S.time,
+                    S.freq,
+                    pow2db.(S.power),
+                    size = (448, 448),
+                    showaxis = false,
+                    ticks = false,
+                    legend = false,
+                    thickness_scaling = 0,
+                )
+
+                savefig(outfile)
+            end
+        end
+        print(".")
+    end
+    println("\ndone $location/$trip_date \n")
 end
 
 end # module
