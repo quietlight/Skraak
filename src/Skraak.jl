@@ -41,9 +41,9 @@ function make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{D
 
     # Load and group data frame by file
     gdf = DataFrame(CSV.File(preds_path)) |>
-            assert_not_empty |>
+            x -> assert_not_empty(x, preds_path) |>
             x -> rename_column!(x, "1.0", "kiwi") |>
-            assert_detections_present |> # assumes kiwi
+            x -> assert_detections_present(x, location, trip_date) |> # assumes kiwi binary classifier
             filter_positives! |> # assumes kiwi
             insert_datetime_column! |>
             x -> exclude_daytime!(x, dawn_dusk_dict) |>
@@ -78,19 +78,19 @@ end
 
 #######################################################################
 
-function assert_not_empty(df::DataFrame)::DataFrame
-    size(df) != (0,0) ? (return df) : error("Empty dataframe at $preds_path")
+function assert_not_empty(df::DataFrame, preds_path::String)::DataFrame
+    size(df) != (0,0) ? (return df) : @error "Empty dataframe at $preds_path"
+    #return df
 end
-
 
 function rename_column!(df::DataFrame, old_name::String, new_name::String)::DataFrame
     old_name in names(df) && rename!(df, old_name => new_name)
     return df
 end
 
-# assumes kiwi
-function assert_detections_present(df::DataFrame)::DataFrame
-    1.0 in levels(df.kiwi) ? (return df) : error("No kiwi detections at $location/$trip_date")
+# assumes kiwi, binary classifier from opensoundscape
+function assert_detections_present(df::DataFrame, location::String, trip_date::String)::DataFrame
+    1.0 in levels(df.kiwi) ? (return df) : @error "No kiwi detections at $location/$trip_date"
 end
 
 # assumes kiwi
