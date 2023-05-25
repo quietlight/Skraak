@@ -4,7 +4,7 @@ export  make_clips, aggregate_labels, audiodata_db
 
 include("Utility.jl")
 
-using CSV, DataFrames, DataFramesMeta, Dates, DSP, Glob, HTTP, JSON, Plots, Random, TimeZones, WAV
+using CSV, DataFrames, DataFramesMeta, Dates, DSP, Glob, JSON, Plots, Random, TimeZones, WAV
 
 """
 make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
@@ -136,6 +136,7 @@ function cluster_detections(start_times::Vector{Float64})::Vector{Vector{Float64
     return detections
 end
 
+# assumes it is operating on 5 second clips
 function calculate_clip_start_end(detection::Vector{Float64}, freq::Float32, length_signal::Int64)::Tuple{Float64, Float64}
     first(detection) > 0 ? st = first(detection) * freq : st = 1
     (last(detection) + 5.0) * freq <= length_signal ?
