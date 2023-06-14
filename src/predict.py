@@ -17,7 +17,8 @@ from datetime import datetime
 
 model = load_model('/home/david/best.model')
 
-folders =  glob('./*/2022-?????/')
+# folders =  glob('./*/2023-?????/')
+folders =  glob('./*/2023-06-10/')
 for folder in folders:
     os.chdir(folder)
     print(folder, ' start: ', datetime.now())
@@ -29,8 +30,8 @@ for folder in folders:
             overlap_fraction = 0.5, 
             batch_size =  128, 
             num_workers = 12)
-    scores.to_csv("scores-2023-03-14.csv")
-    preds.to_csv("preds-2023-03-14.csv")
+    scores.to_csv("scores-2023-06-12.csv")
+    preds.to_csv("preds-2023-06-12.csv")
     os.chdir('../..')
     print(folder, ' done: ', datetime.now())
     print()

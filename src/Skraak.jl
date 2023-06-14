@@ -18,6 +18,7 @@ It saves  wav and png files to /home/david/Upload/
 need to use a sry/catch because the 2 assert functions thow an error to short circuit the function
 
 using Glob, Skraak
+predictions = glob("*/2023-06-10/preds*")
 predictions = glob("path/to/preds*")
 for file in predictions
     try
@@ -43,8 +44,8 @@ function make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{D
     gdf = DataFrame(CSV.File(preds_path)) |>
             x -> assert_not_empty(x, preds_path) |>
             x -> rename_column!(x, "1.0", "kiwi") |>
-            x -> assert_detections_present(x, location, trip_date) |> # assumes kiwi binary classifier
-            filter_positives! |> # assumes kiwi
+            x -> assert_detections_present(x, location, trip_date) |>
+            filter_positives! |>
             insert_datetime_column! |>
             x -> exclude_daytime!(x, dawn_dusk_dict) |>
             group_by_file!
@@ -89,7 +90,8 @@ function rename_column!(df::DataFrame, old_name::String, new_name::String)::Data
 end
 
 # assumes kiwi, binary classifier from opensoundscape
-function assert_detections_present(df::DataFrame, location::String, trip_date::String)::DataFrame
+# needed to remove ::String annotation for location, trip_date to make it work
+function assert_detections_present(df::DataFrame, location, trip_date)::DataFrame
     1.0 in levels(df.kiwi) ? (return df) : @error "No kiwi detections at $location/$trip_date"
 end
 
