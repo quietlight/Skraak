@@ -1,18 +1,15 @@
 # Utility.jl
 
-#module Utility
-
 using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON, Plots, Random, SHA, TimeZones, WAV, XMLDict
 
 export back_one_hour!,
     check_png_wav_both_present,
     file_metadata_to_df,
-    img_dataset,
+    TF_file_metadata_to_df,
+    secondary_dataset,
     resize_image!,
     twilight_tuple_local_time,
     utc_to_nzdt!
-
-
 
 """
 back_one_hour!(files::Vector{String})
@@ -98,7 +95,7 @@ end
 #=
 used like:
 using Glob, Skraak, CSV
-folders=glob("*/2023-06-10/")
+folders=glob("*/2023-09-11*/")
 for folder in folders
 cd(folder)
     try
@@ -109,6 +106,21 @@ cd(folder)
     end
 cd("/media/david/Pomona-3/Pomona-3/")
 end
+
+Then using duckdb cli from SSD:
+duckdb AudioData.duckdb
+show tables;
+SELECT * FROM pomona_files;
+COPY pomona_files FROM '/media/david/Pomona-3/Pomona-3/pomona_files_20230722.csv';
+SELECT * FROM pomona_files;
+
+Then backup with:
+EXPORT DATABASE 'AudioDataBackup_2023-07-29';
+.quit
+Then quit and backup using cp on the db file
+
+Then rsync ssd to usb
+rsync -avzr  --delete /media/david/SSD1/ /media/david/USB/
 =#
 """
 file_metadata_to_df()
@@ -351,7 +363,7 @@ CSV.write("/media/david/USB/P_Duet.csv", d)
 files=glob("*.csv")
 dfs = DataFrame.(CSV.File.(files))
 df = reduce(vcat, dfs)
-x=eval.(Meta.parse.(df.box)) 
+x=eval.(Meta.parse.(df.box))
 df.box = x
 sort!(df)
 ;cd /media/david
@@ -361,14 +373,15 @@ df2=df[4421:4521, :]
 =#
 
 """
-img_dataset(df::DataFrame)
+secondary_dataset(df::DataFrame)
 
 Takes a dataframe and makes png spectro images for secondary classifier.
+I used this to make my original MFDN and COF, Noise datasets, from data that was origieally tagged in avianz, I think.
 Should be run from /media/david
 
 using DSP, Plots, WAV, DataFrames, CSV, Glob
 """
-function img_dataset(df::DataFrame)
+function secondary_dataset(df::DataFrame)
     for row in eachrow(df)
         signal, freq = wavread(
             "$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)",
@@ -560,7 +573,75 @@ function utc_to_nzdt!(files::Vector{String})
     print("Tidy\n")
 end
 
+#=
+used like:
+cd("/media/david/Pomona-3/Tuning_Fork_Recorders/")
+using Glob, Skraak, CSV
+folders=glob("TF_*/*/")
+for folder in folders
+cd(folder)
+    try
+        df = Skraak.TF_file_metadata_to_df()
+        CSV.write("/media/david/Pomona-3/Tuning_Fork_Recorders/tuning_fork_files.csv", df; append=true)
+    catch
+        @warn "error with $folder"
+    end
+cd("/media/david/Pomona-3/Tuning_Fork_Recorders/")
+end
+=#
+function TF_file_metadata_to_df()
+    # Initialise dataframe with columns: disk, location, trip_date, file, lattitude, longitude, start_recording_period_localt, finish_recording_period_localt, duration, sample_rate, zdt, ldt, moth_id, gain, battery, temperature
+    df = DataFrame(
+        disk = String[],
+        location = String[],
+        file = String[],
+        duration = Float64[],
+        sample_rate = Int[],
+        ldt = String[]
+    )
 
+    #Get WAV list for folder
+    wav_list = glob("*.wav") |> sort
 
+    #Return empty df if nothing in the folder
+    if length(wav_list) == 0
+        return df
+    end
 
-#end # module                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         
+    #Get path info from file system
+    raw_path_vec = split(pwd(), "/")[end-3:end]
+
+    disk = raw_path_vec[1]
+    location = raw_path_vec[end-1]
+
+    #So I know what it is doing
+    println(raw_path_vec)
+
+    #Loop over file list
+    for file in wav_list
+        #print(file)
+        try
+            audio_data, sample_rate = wavread(file)
+            duration = Float64(length(audio_data) / sample_rate)
+            ldt = DateTime(split(file, ".")[1], dateformat"yyyymmdd_HHMMSS") |>
+                x -> ZonedDateTime(x, tz"Pacific/Auckland") |>
+                x -> Dates.format(x, "yyyy-mm-dd HH:MM:SSzzzz")
+
+            #Populate row to push into df
+            row = [
+                disk,
+                location,
+                file,
+                duration,
+                Int(sample_rate),
+                ldt
+            ]
+            push!(df, row)
+
+            print(".")
+        catch
+            @warn "error with  $file" #$folder
+        end
+    end
+    return df
+end

@@ -18,20 +18,20 @@ from datetime import datetime
 model = load_model('/home/david/best.model')
 
 # folders =  glob('./*/2023-?????/')
-folders =  glob('./*/2023-06-10/')
+folders =  glob('./*/2023-09-11/')
 for folder in folders:
     os.chdir(folder)
     print(folder, ' start: ', datetime.now())
     # Beware, secretary island files are .wav
-    field_recordings = glob('./*.WAV')	
+    field_recordings = glob('./*.WAV')
     scores, preds, unsafe = model.predict(
-            field_recordings, 
-            binary_preds = 'single_target', 
-            overlap_fraction = 0.5, 
-            batch_size =  128, 
+            field_recordings,
+            binary_preds = 'single_target',
+            overlap_fraction = 0.5,
+            batch_size =  128,
             num_workers = 12)
-    scores.to_csv("scores-2023-06-12.csv")
-    preds.to_csv("preds-2023-06-12.csv")
+    scores.to_csv("scores-2023-09-11.csv")
+    preds.to_csv("preds-2023-09-11.csv")
     os.chdir('../..')
     print(folder, ' done: ', datetime.now())
     print()

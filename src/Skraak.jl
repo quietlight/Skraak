@@ -15,12 +15,12 @@ it calls night() and may call construct_dawn_dusk_dict() unless the dict is glob
 
 It should be run from Pomona-1/, Pomona-2/ or Pomona-3/, assumes it is, it uses the path
 It saves  wav and png files to /home/david/Upload/
-need to use a sry/catch because the 2 assert functions thow an error to short circuit the function
+need to use a try/catch because the 2 assert functions thow an error to short circuit the function
 
 using Glob, Skraak
-predictions = glob("*/2023-06-10/preds*")
+predictions = glob("*/2023-09-11*/preds*")
 predictions = glob("path/to/preds*")
-for file in predictions
+for file in predictions[1:6] #[7:12][13:18][19:24]
     try
         make_clips(file)
     catch x
@@ -207,7 +207,22 @@ end
 
 #INBETWEEN STEP: use secondary model to sort clips, move clips into D, F, M, N, and hand classify, classify into COF, Noise, geneerate csv's.
 
+#=
+actual_mfdn must be list of qualified file names D/C05-2023-04-15-20230219_223000-380-470.png etc
+using Glob, DataFrames, CSV
+a=glob("[M,F,D,N]/*.png")
+mfdn_df = DataFrame(file=a)
+CSV.write("actual_mfdn.csv", mfdn_df)
 
+make a folder D,F,M,N
+df=DataFrame(CSV.File("actual_mfdn.csv"))
+for row in eachrow(df)
+   src=split(row.file, "/")[2]
+   dst=row.file
+   mv(src, dst)
+   mv(chop(src, tail=3)*"wav", chop(dst, tail=3)*"wav")
+end
+=#
 """
 aggregate_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
 
@@ -229,12 +244,37 @@ This function prepares the csv output from my hand classification and secondary 
 
 assumes run from Clips_xxxx-xx-xx folder and that actual_mfdn.csv, predicted_cof.csv, predicted_noise.csv, and that
 assumes file names if not specified
-saves a csv and also returns a dataframe
+returns a dataframe
 
-df=aggregate_labels()
 
 using CSV, DataFrames, DataFramesMeta
 """
+#=
+df=aggregate_labels()
+CSV.write("pomona_labels.csv", df)
+or
+CSV.write("pomona_labels.csv", df; header=false)
+
+audiodata_db(df, "pomona_labels_20230418") NOT_WORKING maybe titles
+to use cli, need to remove header row
+duckdb AudioData.duckdb
+COPY pomona_labels_20230418 FROM 'Clips_2023-07-22/pomona_labels.csv';
+
+Then backup with:
+EXPORT DATABASE 'AudioDataBackup_2023-09-11';
+.quit
+Then quit and backup using cp on the db file, dated copy
+
+Then rsync ssd to usb
+rsync -avzr  --delete /media/david/SSD1/ /media/david/USB/
+
+note: run on mac
+cd skraak.kiwi
+julia-1.9
+using Franklin
+serve()
+
+=#
 function aggregate_labels(
     actual::String = "actual_mfdn.csv",
     cof::String = "predicted_cof.csv",
@@ -305,7 +345,7 @@ Use to upload labels to AudioData.duckdb
 
 Takes a dataframe and inserts into AudioData.db table.
 
-audiodata_db(df, "pomona_labels_20230405")
+audiodata_db(df, "pomona_labels_20230418")
 
 using DataFrames, DBInterface, DuckDB, Random
 """
