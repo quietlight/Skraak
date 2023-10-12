@@ -20,7 +20,7 @@ need to use a try/catch because the 2 assert functions thow an error to short ci
 using Glob, Skraak
 predictions = glob("*/2023-09-11*/preds*")
 predictions = glob("path/to/preds*")
-for file in predictions[1:6] #[7:12][13:18][19:24]
+for file in predictions #[1:6][7:12][13:18][19:24]
     try
         make_clips(file)
     catch x
