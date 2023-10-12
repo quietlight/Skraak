@@ -3,6 +3,7 @@ module Skraak
 export  make_clips, aggregate_labels, audiodata_db
 
 include("Utility.jl")
+include("Predict.jl")
 
 using CSV, DataFrames, DataFramesMeta, Dates, DSP, Glob, JSON, Plots, Random, TimeZones, WAV
 
