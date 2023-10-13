@@ -2,10 +2,16 @@ module Skraak
 
 export  make_clips, aggregate_labels, audiodata_db
 
-include("Utility.jl")
+include("Train.jl")
 include("Predict.jl")
+include("Utility.jl")
 
-using CSV, DataFrames, DataFramesMeta, Dates, DSP, Glob, JSON, Plots, Random, TimeZones, WAV
+using CSV, DataFrames, Dates, DSP, Glob, JSON, Plots, Random, TimeZones, WAV
+
+import DataFramesMeta: @transform!
+import DataFramesMeta: @subset!
+import DataFramesMeta: @byrow
+import DataFramesMeta: @passmissing
 
 """
 make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
