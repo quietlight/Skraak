@@ -2,7 +2,7 @@ module Skraak
 
 export  make_clips, aggregate_labels, audiodata_db
 
-include("Train.jl")
+#include("Train.jl")
 include("Predict.jl")
 include("Utility.jl")
 
@@ -373,6 +373,6 @@ function audiodata_db(df::DataFrame, table::String)
     DBInterface.close!(con)
 end
 
-# Rebuild skraak.kiwi, watch out for rats unless there is neew up to date data there already
+# Rebuild skraak.kiwi, watch out for rats unless there is new up to date data there already
 
 end # module
