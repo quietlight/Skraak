@@ -1,11 +1,10 @@
 # Utility.jl
 
-using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON, Plots, Random, SHA, TimeZones, WAV, XMLDict
+using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON, PNGFiles, Random, SHA, TimeZones, WAV, XMLDict 
 
 export back_one_hour!,
     check_png_wav_both_present,
     file_metadata_to_df,
-    TF_file_metadata_to_df,
     secondary_dataset,
     resize_image!,
     twilight_tuple_local_time,
@@ -81,6 +80,7 @@ is a path to a directory.
 
 Returns: Nothing - This function only prints messages to the console.
 """
+
 function check_png_wav_both_present(folders::Vector{String})
     println("No matching wav: ")
     for folder in folders
@@ -379,7 +379,7 @@ Takes a dataframe and makes png spectro images for secondary classifier.
 I used this to make my original MFDN and COF, Noise datasets, from data that was origieally tagged in avianz, I think.
 Should be run from /media/david
 
-using DSP, Plots, WAV, DataFrames, CSV, Glob
+using DSP, WAV, DataFrames, CSV, Glob, Images, PNGFiles
 """
 function secondary_dataset(df::DataFrame)
     for row in eachrow(df)
@@ -392,21 +392,8 @@ function secondary_dataset(df::DataFrame)
         sample = signal[Int(st):Int(en)]
         name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
         outfile = "/home/david/ImageSet/$(row.label)/$name"
-        #spectrogram
-        n = 400
-        fs = convert(Int, freq)
-        S = spectrogram(sample[:, 1], n, n ÷ 200; fs = fs)
-        heatmap(
-            S.time,
-            S.freq,
-            pow2db.(S.power),
-            size = (448, 448),
-            showaxis = false,
-            ticks = false,
-            legend = false,
-            thickness_scaling = 0,
-        )
-        savefig(outfile)
+        image = get_image_from_sample(sample, freq)
+        PNGFiles.save("$outfile.png", image)
         print(".")
     end
     println("done")
@@ -573,75 +560,3 @@ function utc_to_nzdt!(files::Vector{String})
     print("Tidy\n")
 end
 
-#=
-used like:
-cd("/media/david/Pomona-3/Tuning_Fork_Recorders/")
-using Glob, Skraak, CSV
-folders=glob("TF_*/*/")
-for folder in folders
-cd(folder)
-    try
-        df = Skraak.TF_file_metadata_to_df()
-        CSV.write("/media/david/Pomona-3/Tuning_Fork_Recorders/tuning_fork_files.csv", df; append=true)
-    catch
-        @warn "error with $folder"
-    end
-cd("/media/david/Pomona-3/Tuning_Fork_Recorders/")
-end
-=#
-function TF_file_metadata_to_df()
-    # Initialise dataframe with columns: disk, location, trip_date, file, lattitude, longitude, start_recording_period_localt, finish_recording_period_localt, duration, sample_rate, zdt, ldt, moth_id, gain, battery, temperature
-    df = DataFrame(
-        disk = String[],
-        location = String[],
-        file = String[],
-        duration = Float64[],
-        sample_rate = Int[],
-        ldt = String[]
-    )
-
-    #Get WAV list for folder
-    wav_list = glob("*.wav") |> sort
-
-    #Return empty df if nothing in the folder
-    if length(wav_list) == 0
-        return df
-    end
-
-    #Get path info from file system
-    raw_path_vec = split(pwd(), "/")[end-3:end]
-
-    disk = raw_path_vec[1]
-    location = raw_path_vec[end-1]
-
-    #So I know what it is doing
-    println(raw_path_vec)
-
-    #Loop over file list
-    for file in wav_list
-        #print(file)
-        try
-            audio_data, sample_rate = wavread(file)
-            duration = Float64(length(audio_data) / sample_rate)
-            ldt = DateTime(split(file, ".")[1], dateformat"yyyymmdd_HHMMSS") |>
-                x -> ZonedDateTime(x, tz"Pacific/Auckland") |>
-                x -> Dates.format(x, "yyyy-mm-dd HH:MM:SSzzzz")
-
-            #Populate row to push into df
-            row = [
-                disk,
-                location,
-                file,
-                duration,
-                Int(sample_rate),
-                ldt
-            ]
-            push!(df, row)
-
-            print(".")
-        catch
-            @warn "error with  $file" #$folder
-        end
-    end
-    return df
-end
