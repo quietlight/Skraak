@@ -1,33 +1,67 @@
 # Train.jl
 
-# https://github.com/FluxML/model-zoo/blob/master/tutorials/transfer_learning/transfer_learning.jl
-# This works on my data IT TRAINS best, but only -t 4
-# dont forget temp env
+import Base: length, getindex
+using CUDA, DataFrames, Dates, Images, Flux, FreqTables, Glob, JLD2, Metalhead, Noise
+using Random: shuffle!, seed!
 
-using Random: shuffle!
-using Random: seed!
-import Base: length
-import Base: getindex
-using Images
-using Flux
-using CUDA
-using Metalhead
-using Noise
-using Glob
-using BSON: @save
-using Dates
-#using CSV
-using DataFrames
-using FreqTables
-using JLD2
-using Logging, LoggingExtras
+export train #beware Flux.train! is not Skraak.train
 
-imgs = glob("2023-09-*/*/*/[N,K]/*.png") #from SSD2
+```
+Note:
+Dont forget temp env,  julia -t 4
+Assumes 224x224 pixel RGB images as png's
 
-seed!(1234);
-shuffle!(imgs)
+Saves jld2's in current directory
+```
+#=
+train(
+        glob_pattern::String, 
+        label_to_index::Dict{String,Int32}, #may have to be in global scope too
+        pretrain::Bool,
+        epochs::UnitRange{Int64},
+        model_name::String,
+        train_test_split::Float64 = 0.95,
+        batch_size::Int64 = 64
+        )
 
-#CSV.write("files.csv", DataFrame(file=imgs))
+use like:
+glob_pattern = "2023-09-*/*/*/[N,K]/*.png" #from SSD2
+label_to_index = Dict{String,Int32}("K" => 1, "N" => 2)
+train(glob_pattern, label_to_index, true, 1:9, "K1-3")
+
+#using BSON: @save
+#BSON.@save "model_K1-3_CPU_epoch-$epoch-$metric_test-$(now()).bson" _model
+=#
+function train(
+        glob_pattern::String, 
+        label_to_index::Dict{String,Int32}, #may have to be in global scope too
+        pretrain::Bool,
+        epochs::UnitRange{Int64},
+        model_name::String,
+        train_test_split::Float64 = 0.8,
+        batch_size::Int64 = 64
+        )
+
+    imgs = glob(glob_pattern)
+    @info "$(length(imgs)) images in dataset"
+
+    ceiling = length(imgs) ÷ batch_size * batch_size
+    train_test_index = ceiling ÷ batch_size * train_test_split |> 
+        round |> 
+        x -> x * batch_size |> 
+        x -> convert(Int, x)
+    classes = length(label_to_index)
+    @info "$classes classes in dataset"
+    @info "Device: $device"
+    train, train_sample, test = process_data(imgs, train_test_index, ceiling)
+    @info "Made data loaders"
+    model = load_model(pretrain, classes)
+    @info "Loaded model"
+    opt = Flux.setup(Flux.Optimisers.Adam(1e-5), model)
+    @info "Training for $epochs epochs: " now()
+    training_loop!(model, opt, train, train_sample, test, epochs, model_name, classes)
+    @info "Finished $(last(epochs)) epochs: " now()
+end
 
 device = CUDA.functional() ? gpu : cpu
 
@@ -39,27 +73,32 @@ struct ValidationImageContainer{T<:Vector}
     img::T
 end
 
-data = ImageContainer(imgs)
-#val_data = ValidationImageContainer(imgs)
+Container = Union{ImageContainer,ValidationImageContainer}
+
+function process_data(array_of_file_names, train_test_index, ceiling)
+    seed!(1234);
+    imgs = shuffle!(array_of_file_names)
+    train = ImageContainer(imgs[1:train_test_index]) |>
+        x -> make_dataloader(x, batch_size)
+    train_sample = ValidationImageContainer(imgs[1:(ceiling-train_test_index)]) |>
+        x -> make_dataloader(x, batch_size)
+    test = ValidationImageContainer(imgs[train_test_index+1:ceiling]) |>
+        x -> make_dataloader(x, batch_size)
+    return train, train_sample, test
+end
 
 length(data::ImageContainer) = length(data.img)
 length(data::ValidationImageContainer) = length(data.img)
 
-const im_size = (224, 224)
-name_to_idx = Dict{String,Int32}("K" => 1, "N" => 2)
-
 function getindex(data::ImageContainer{Vector{String}}, idx::Int)
     path = data.img[idx]
-    img =
-        Images.load(path) |>
-        x ->
-            Images.imresize(x, 224, 224) |>
-            x ->
-                Noise.add_gauss(x, (rand() * 0.2)) |>
-                x ->
-                    apply_mask(x, 3, 3, 12) |>
-                    x -> collect(channelview(float32.(x))) |> x -> permutedims(x, (3, 2, 1))
-    y = name_to_idx[(split(path, "/")[end-1])]
+    img = Images.load(path) |>
+        #x -> Images.imresize(x, 224, 224) |>
+        x -> Noise.add_gauss(x, (rand() * 0.2)) |>
+        x -> apply_mask!(x, 3, 3, 12) |>
+        x -> collect(channelview(float32.(x))) |> 
+        x -> permutedims(x, (3, 2, 1))
+    y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
     return img, y
 end
 
@@ -67,15 +106,15 @@ function getindex(data::ValidationImageContainer{Vector{String}}, idx::Int)
     path = data.img[idx]
     img =
         Images.load(path) |>
-        x ->
-            Images.imresize(x, 224, 224) |>
-            x -> collect(channelview(float32.(x))) |> x -> permutedims(x, (3, 2, 1))
-    y = name_to_idx[(split(path, "/")[end-1])]
+        #x -> Images.imresize(x, 224, 224) |>
+        x -> collect(channelview(float32.(x))) |> 
+        x -> permutedims(x, (3, 2, 1))
+    y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
     return img, y
 end
 
 # assumes 224px square images
-function apply_mask(
+function apply_mask!(
     img::Array{RGB{N0f8},2},
     max_number::Int = 3,
     min_size::Int = 3,
@@ -107,43 +146,38 @@ function get_random_ranges(max_number::Int, min_size::Int, max_size::Int)
     return ranges
 end
 
-# define DataLoaders
-const batch_size = 64
-const train_test_split = 0.95
-const ceiling = length(data) ÷ batch_size * batch_size
-const train_test_index =
-    ceiling ÷ batch_size * train_test_split |> round |> x -> x * batch_size |> Int
-
-train = Flux.DataLoader(
-    ImageContainer(imgs[1:train_test_index]);
+function make_dataloader(container::Container, batch_size::Int)
+    data = Flux.DataLoader(
+    container;
     batchsize = batch_size,
     collate = true,
     parallel = true,
-)
-device == gpu ? train = CuIterator(train) : nothing
+    )
+    device == gpu ? data = CuIterator(data) : nothing
+    return data
+end
 
-train_sample = Flux.DataLoader(
-    ValidationImageContainer(imgs[1:(ceiling-train_test_index)]);
-    batchsize = batch_size,
-    collate = true,
-    parallel = true,
-)
-device == gpu ? train_sample = CuIterator(train_sample) : nothing
+function load_model(pretrain::Bool, classes::Int64)
+    fst = Metalhead.ResNet(18, pretrain = pretrain).layers
+    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes));
+    model = Flux.Chain(fst[1], lst) |> device
+    return model
+end
 
-test = Flux.DataLoader(
-    ValidationImageContainer(imgs[train_test_index+1:ceiling]);
-    batchsize = batch_size,
-    collate = true,
-    parallel = true,
-)
-device == gpu ? test = CuIterator(test) : nothing
+function load_model(model_path::String, classes::Int64)
+    model_state = JLD2.load(model_path, "model_state")
+    model_classes = length(model_state[1][2][1][3][2])
+    f = Metalhead.ResNet(18, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
+    m = Flux.Chain(f[1], l)
+    Flux.loadmodel!(m, model_state)
+    fst = m.layers
+    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes));
+    model = Flux.Chain(fst[1], lst) |> device
+    return model
+end
 
-fst = Metalhead.ResNet(18, pretrain = true).layers
-# BEWARE NUMBER CLASSES
-lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => 2));
-model = Flux.Chain(fst[1], lst) |> device
-
-function eval_f(m, d)
+function evaluate(m, d)
     good = 0
     count = 0
     pred = []
@@ -161,50 +195,42 @@ function eval_f(m, d)
     return accuracy, confusion_matrix
 end
 
-# BEWARE NUMBER CLASSES
-function train_epoch!(model; opt, train)
+function train_epoch!(model; opt, train, classes)
     Flux.train!(model, train, opt) do m, x, y
-        Flux.Losses.logitcrossentropy(m(x), Flux.onehotbatch(y, 1:2))
+        Flux.Losses.logitcrossentropy(m(x), Flux.onehotbatch(y, 1:classes))
     end
 end
 
-opt = Flux.setup(Flux.Optimisers.Adam(1e-5), model);
+function training_loop!(model, opt, train, train_sample, test, epochs::UnitRange{Int64}, model_name, classes)
+    @time eval, vcm = evaluate(model, test)
+    @info "warm up" accuracy = eval
+    @info "warm up" vcm
 
-logger = FileLogger("logfile.txt"; append = true)
-
-@time metric_eval, v_confusion_matrix = eval_f(model, test)
-with_logger(logger) do
-    @info "eval" accuracy = metric_eval
-    @info "eval" v_confusion_matrix
-end
-
-a = 0.0
-for iter in 1:9
-    println("")
-    println("Epoch: $iter")
-    @time train_epoch!(model; opt, train)
-    @time metric_train, t_confusion_matrix = eval_f(model, train_sample)
-    with_logger(logger) do
-        @info "Epoch: " iter
+    a = 0.0
+    for epoch in epochs
+        println("")
+        @info "Starting Epoch: $epoch"
+        @time train_epoch!(model; opt, train, classes)
+        @time metric_train, train_confusion_matrix = evaluate(model, train_sample)
+        @info "Epoch: $epoch" 
         @info "train" accuracy = metric_train
-        @info "train" t_confusion_matrix
-    end
-    @time metric_eval, v_confusion_matrix = eval_f(model, test)
-    with_logger(logger) do
-        @info "test" accuracy = metric_eval
-        @info "test" v_confusion_matrix
-    end
-    metric_eval > a && begin
-        a = metric_eval
-        let _model = cpu(model)
-            jldsave(
-                "model_K1-3_CPU_epoch-$iter-$metric_eval-$(now()).jld2";
-                model_state = Flux.state(_model),
-            )
-            #BSON.@save "model_K1-3_CPU_epoch-$iter-$metric_eval-$(now()).bson" _model
-            with_logger(logger) do
+        @info "train" train_confusion_matrix
+        
+        @time metric_test, test_confusion_matrix = evaluate(model, test)
+        @info "test" accuracy = metric_test
+        @info "test" test_confusion_matrix
+        
+        metric_test > a && begin
+            a = metric_test
+            let _model = cpu(model)
+                jldsave(
+                    "model_$(model_name)_CPU_epoch-$epoch-$metric_test-$(now()).jld2";
+                    model_state = Flux.state(_model),
+                )
                 @info "Saved a best_model"
             end
         end
     end
 end
+
+#label_to_index = Dict{String,Int32}("D" => 1, "F" => 2)

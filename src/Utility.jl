@@ -5,7 +5,6 @@ using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON
 export back_one_hour!,
     check_png_wav_both_present,
     file_metadata_to_df,
-    secondary_dataset,
     resize_image!,
     twilight_tuple_local_time,
     utc_to_nzdt!
@@ -320,84 +319,7 @@ function file_metadata_to_df()
     return df
 end
 
-#=
-make dataset for image model
-drive   location    trip_date   file    box     label
 
-using CSV, DataFrames, DataFramesMeta, Glob
-
-m = DataFrame(CSV.File("/media/david/USB/images_model/P_Male.csv"))
-
-#run from media/david
-function get_drive_and_trip_date(location, file)
-    a=glob("Pomona-*/Pomona-*/$location/*/$file")
-    length(a) > 0 ? b=split(a[1], "/") : b=missing
-    return b
-end
-
-c = DataFrame(CSV.File("/media/david/USB/SecondaryModel_COF/close.csv"))
-#note: dropmissing!(df) or @transform df @byrow @passmissing or delete rows that dont work
-@transform!(c, @byrow :trip_date=get_drive_and_trip_date(:location, :file)[4])
-@transform!(c, @byrow :drive=get_drive_and_trip_date(:location, :file)[1])
-CSV.write("/media/david/USB/SecondaryModel_COF/close.csv", c)
-
-#get trip date
-function get_td(drive, location, file)
-       a=glob("$drive/$drive/$location/*/$file")
-       length(a) > 0 ? b=split(a[1], "/")[end-1] : b=missing
-       return b
-       end
-
-@transform!(m, @byrow :trip_date=get_td(:drive, :location, :file))
-
-CSV.write("/media/david/USB/P_Male.csv", m)
-
-f = DataFrame(CSV.File("/media/david/USB/images_model/P_Female.csv"))
-@transform!(f, @byrow :trip_date=get_td(:drive, :location, :file))
-CSV.write("/media/david/USB/P_Female.csv", f)
-
-d = DataFrame(CSV.File("/media/david/USB/images_model/P_Duet.csv"))
-@transform!(d, @byrow :trip_date=get_td(:drive, :location, :file))
-CSV.write("/media/david/USB/P_Duet.csv", d)
-
-files=glob("*.csv")
-dfs = DataFrame.(CSV.File.(files))
-df = reduce(vcat, dfs)
-x=eval.(Meta.parse.(df.box))
-df.box = x
-sort!(df)
-;cd /media/david
-CSV.write("/media/david/USB/Aggregate.csv", df)
-
-df2=df[4421:4521, :]
-=#
-
-"""
-secondary_dataset(df::DataFrame)
-
-Takes a dataframe and makes png spectro images for secondary classifier.
-I used this to make my original MFDN and COF, Noise datasets, from data that was origieally tagged in avianz, I think.
-Should be run from /media/david
-
-using DSP, WAV, DataFrames, CSV, Glob, Images, PNGFiles
-"""
-function secondary_dataset(df::DataFrame)
-    for row in eachrow(df)
-        signal, freq = wavread(
-            "$(row.drive)/$(row.drive)/$(row.location)/$(row.trip_date)/$(row.file)",
-        )
-        row.box[1] * freq > 1 ? st = floor(Int, (row.box[1] * freq)) : st = 1
-        row.box[2] * freq < length(signal) ? en = ceil(Int, (row.box[2] * freq)) :
-        en = length(signal)
-        sample = signal[Int(st):Int(en)]
-        name = "$(row.location)-$(row.trip_date)-$(chop(row.file, tail=4))-$(Int(floor(row.box[1])))-$(Int(ceil(row.box[2])))"
-        outfile = "/home/david/ImageSet/$(row.label)/$name"
-        image = get_image_from_sample(sample, freq)
-        PNGFiles.save("$outfile.png", image)
-        print(".")
-    end
-    println("done")
-end
 
 """
 resize_image!(name::String, x::Int64=224, y::Int64=224)
@@ -491,6 +413,76 @@ function twilight_tuple_local_time(dr::StepRange{Date,Day})
         "nautical_twilight_end",
     ]
     df = DataFrame([name => [] for name in cols])
+    for day in dr
+        resp =
+            HTTP.get(
+                "https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$day&formatted=0",
+            ) |>
+            x -> String(x.body) |> JSON.Parser.parse |> x -> get(x, "results", "missing")
+        resp["day"] = string(day)
+        push!(df, resp)
+        print("$day  ")
+        sleep(3)
+    end
+    CSV.write("sunrise_sunset.csv", df)
+    return df
+end
+
+"""
+utc_to_nzdt!files::Vector{String})
+
+Takes a list of moth files and rewrites UTC filenames to NZDT, because since
+reconfiguring my moths at start of daylight saving they are recording UTC
+filenames which is not consistent with the way my notebook works.
+
+a = glob("*/2022-12-17/")
+for folder in a
+cd(folder)
+println(folder)
+files = glob("*.WAV")
+utc_to_nzdt!files)
+cd("/media/david/Pomona-2")
+end
+
+using Dates, TimeZones
+"""
+function utc_to_nzdt!(files::Vector{String})
+    fix_extension_of_files = []
+    for old_file in files
+        a = chop(old_file, tail = 4)
+        d, t = split(a, "_")
+
+        ye = parse(Int64, d[1:4])
+        mo = parse(Int64, d[5:6])
+        da = parse(Int64, d[7:8])
+        ho = parse(Int64, t[1:2])
+        mi = parse(Int64, t[3:4])
+        se = parse(Int64, t[5:6])
+
+        dt = ZonedDateTime(ye, mo, da, ho, mi, se, tz"UTC")
+        new_date = astimezone(dt, tz"Pacific/Auckland")
+        # Must drop the WAV extension to avoiding force=true 
+        # with  mv, since  the new file name may already exist and mv
+        # will stacktrace leaving a big mess to tidy up.
+        isfile(Dates.format(new_date, "yyyymmdd_HHMMSS") * ".tmp") ?
+        base_file = Dates.format((new_date + Dates.Second(1)), "yyyymmdd_HHMMSS") :
+        base_file = Dates.format(new_date, "yyyymmdd_HHMMSS")
+        temp_file = base_file * ".tmp"
+
+        # Tuple to tidy extensions later
+        tidy = (temp_file, base_file * ".WAV")
+
+        mv(old_file, temp_file)
+        push!(fix_extension_of_files, tidy)
+        print(".")
+    end
+    for item in fix_extension_of_files
+        mv(item[1], item[2])
+    end
+    print("Tidy\n")
+end
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       name in cols])
     for day in dr
         resp =
             HTTP.get(
