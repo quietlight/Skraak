@@ -1,5 +1,4 @@
 # Predict.jl
-#can't load a model so need to finish this later, start with load_model()
 
 using WAV, DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2
 
@@ -21,9 +20,11 @@ I use this function to find kiwi from new data gathered on a trip.
 """
 
 function predict(glob_pattern::String, model::String)
-    model = load_jld2(model) |> device
+    model = load_model(model) |> device
     folders = glob(glob_pattern)
+    @info "Folders: $folders"
     for folder in folders
+        @info "Working on: $folder"
         predict_folder(folder, model)
     end
 end
@@ -32,8 +33,7 @@ end
 
 device = CUDA.functional() ? gpu : cpu
 
-#= See Skraak.jl
-function get_image_from_sample(sample, f)
+function get_image_from_sample_for_inference(sample, f)
     S = DSP.spectrogram(sample, 400, 2; fs = f)
     i = S.power
     if minimum(i) == 0.0
@@ -44,11 +44,20 @@ function get_image_from_sample(sample, f)
         DSP.pow2db.(i) |>
         x ->
             x .+ abs(minimum(x)) |>
-            x -> x ./ maximum(x) |> x -> RGB.(x) |> x -> imresize(x, 224, 224)
+            x ->
+                x ./ maximum(x) |>
+                x ->
+                    Float32.(x) |>
+                    x ->
+                        RGB.(x) |>
+                        x ->
+                            imresize(x, 224, 224) |>
+                            channelview |>
+                            x -> permutedims(x, (2, 3, 1))
     return image
-end =#
+end
 
-function get_images_from_wav(file::String, increment::Int, divisor::Int) #5s sample, 2.5s hop
+function get_images(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
     signal, freq = wavread(file)
     if freq > 16000.0f0
         signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
@@ -58,14 +67,14 @@ function get_images_from_wav(file::String, increment::Int, divisor::Int) #5s sam
     inc = increment * f
     hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
     split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
-    raw_images = ThreadsX.map(x -> get_image_from_sample(x, f), split_signal)
+    raw_images = ThreadsX.map(x -> get_image_from_sample_for_inference(x, f), split_signal)
     n_samples = length(raw_images)
     return raw_images, n_samples
 end
 
 function get_images_time_from_wav(file::String, increment::Int = 5, divisor::Int = 2)
-    raw_images, n_samples = get_images_from_wav(file::String, increment, divisor)
-    images = images_to_tensor(raw_images)
+    raw_images, n_samples = get_images(file::String, increment, divisor)
+    images = reshape_images(raw_images)
 
     start_time = 0:(increment/divisor):(n_samples-1)*(increment/divisor)
     end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
@@ -73,49 +82,52 @@ function get_images_time_from_wav(file::String, increment::Int = 5, divisor::Int
     return images, time
 end
 
-function images_to_tensor(raw_images)
-    images =
-        hcat(raw_images...) |>
-        x ->
-            reshape(x, (224, 224, length(raw_images))) |>
-            channelview |>
-            x -> permutedims(x, (2, 3, 1, 4)) |> x -> Float32.(x)
+function reshape_images(raw_images)
+    images = hcat(raw_images...) |> x -> reshape(x, (224, 224, 3, length(raw_images)))
     return images
 end
 
 function predict_file(file::String, folder::String, model)
     #check form of opensoundscape preds.csv and needed by my make_clips
+    @info "File: $file"
     @time images, time = get_images_time_from_wav(file)
-    data = Flux.DataLoader(data; batchsize = size(i)[4], shuffle = false) |> device
-    @time predictions = Flux.onecold(model(data)) |> cpu #######????????
+    data = images |> device
+    @time predictions = model(data) |> x -> Flux.onecold(x)
     f = (repeat(["$file"], length(time)))
-    df = DataFrame(:file => f, :start_time => first.(t), :end_time => last.(t), :label => l)
+    df = DataFrame(
+        :file => f,
+        :start_time => first.(time),
+        :end_time => last.(time),
+        :label => predictions,
+    )
     return df
 end
 
 function predict_folder(folder::String, model)
     files = glob("$folder/*.[W,w][A,a][V,v]")
+    @info "$(length(files)) files in $folder"
     df = DataFrame(
         file = String[],
         start_time = Float64[],
         end_time = Float64[],
         kiwi = Int[],
     ) #just so I know what they are
-    CSV.write("$folder/preds-K1-2-$(today()).csv", df)
+    save_path = "$folder/preds-$(today()).csv"
+    CSV.write("$save_path", df)
     for file in files
         df = predict_file(file, folder, model)
-        CSV.write("$folder/preds-K1-2-$(today()).csv", df, append = true)
-        @info "saved $file preds to $folder/preds-K1-2-$(today()).csv"
+        CSV.write("$save_path", df, append = true)
     end
 end
 
-function load_jld2(model_path::String)
+function load_model(model_path::String)
     model_state = JLD2.load(model_path, "model_state")
-    fst = Metalhead.ResNet(18, pretrain = false).layers
-    # BEWARE NUMBER CLASSES
-    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => 2))
-    model = Flux.Chain(fst[1], lst)
+    model_classes = length(model_state[1][2][1][3][2])
+    f = Metalhead.ResNet(18, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
+    model = Flux.Chain(f[1], l)
     Flux.loadmodel!(model, model_state)
+    return model
 end
 
 #=
@@ -232,7 +244,7 @@ function predict_folder(folder::String, model)
 	l=[]
 	@showprogress for file in files ######
 		@info file
-		images, time = get_images_from_wav(file)
+		images, time = get_images(file)
 		images |> gpu
 	 	@time predictions = Flux.onecold(model(images))
 	 	append!(t, time)
@@ -257,7 +269,7 @@ function get_image_from_sample(st, en, signal, f)
 end
 
 # new, now ThreadsX works its faster. converting to float32 makes inference faster
-function get_images_from_wav(file::String)
+function get_images(file::String)
 	signal, freq = wavread(file)
 	if freq > 16000.0f0
 		signal = DSP.resample(signal, 16000.0f0/freq; dims=1)
@@ -286,7 +298,7 @@ function get_images_from_wav(file::String)
 end
 
 # old: non map function. converting to float32 makes inference faster
-function get_images_from_wav(file::String)
+function get_images(file::String)
 	signal, freq = wavread(file)
 	f=convert(Int, freq)
 	if f > 16000
