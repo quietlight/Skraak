@@ -17,11 +17,30 @@ Args:
 Returns: Nothing - This function saves csv files.
 
 I use this function to find kiwi from new data gathered on a trip.
+
+Note:
+Dont forget temp env,  julia -t 4
+From Pomona-3/Pomona-3/
+
+Use like:
+using Skraak
+glob_pattern = "*/2023-10-19/" #from SSD1
+model = "/media/david/SSD1/model_K1-3_CPU_epoch-10-0.9965-2023-10-18T17:32:36.747.jld2"
+predict(glob_pattern, model)
 """
 
 function predict(glob_pattern::String, model::String)
     model = load_model(model) |> device
     folders = glob(glob_pattern)
+    @info "Folders: $folders"
+    for folder in folders
+        @info "Working on: $folder"
+        predict_folder(folder, model)
+    end
+end
+
+function predict(folders::Vector{String}, model::String)
+    model = load_model(model) |> device
     @info "Folders: $folders"
     for folder in folders
         @info "Working on: $folder"
@@ -110,8 +129,8 @@ function predict_folder(folder::String, model)
         file = String[],
         start_time = Float64[],
         end_time = Float64[],
-        kiwi = Int[],
-    ) #just so I know what they are
+        label = Int[],
+    )
     save_path = "$folder/preds-$(today()).csv"
     CSV.write("$save_path", df)
     for file in files

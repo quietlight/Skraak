@@ -10,12 +10,12 @@ export back_one_hour!,
     utc_to_nzdt!
 
 """
-back_one_hour!(files::Vector{String})
+move_one_hour!(files::Vector{String})
 
 This function takes a vector of file paths and renames each file in the
 vector by changing the name of the file to the name of the file created one
 hour before the original file. The new name format is yyyymmdd_HHMMSS.tmp,
-which represents the time stamp of the original file minus one hour. This
+which represents the time stamp of the original file minus (or plus) one hour. This
 function avoids force=true with mv, since new file names may already exist
 and mv will stacktrace leaving a big mess to tidy up.
 
@@ -28,7 +28,7 @@ Returns: Nothing - This function only renames files and saves them.
 
 I use this to turn the clock back at the end of daylight saving.
 """
-function back_one_hour!(files::Vector{String})
+function move_one_hour!(files::Vector{String}, operator)
     fix_extension_of_files = []
     for old_file in files
         # Extract the date and time of the original file using string chopping
@@ -44,7 +44,8 @@ function back_one_hour!(files::Vector{String})
 
         dt = DateTime(ye, mo, da, ho, mi, se)
 
-        new_date = dt - Dates.Hour(1)
+        #new_date = dt - Dates.Hour(1)
+        new_date = operator(dt, Dates.Hour(1))
         # Must drop the WAV extension to avoiding force=true 
         # with  mv, since  the new file name may already exist and mv
         # will stacktrace leaving a big mess to tidy up.
@@ -87,6 +88,10 @@ function check_png_wav_both_present(folders::Vector{String})
         p = glob("$folder/*.png")
         for png in p
             !isfile(chop(png, tail = 3) * "wav") && println(png)
+        end
+        w = glob("$folder/*.[W,w][A,a][V,v]")
+        for wav in w
+            !isfile(chop(wav, tail = 3) * "png") && println(wav)
         end
     end
 end
