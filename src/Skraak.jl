@@ -43,6 +43,8 @@ using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 # Assumes function run from Pomona-1 or Pomona-2
 function make_clips(
     preds_path::String,
+    #label::Int,
+    #night::,
     dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}} = construct_dawn_dusk_dict(
         "/media/david/SSD1/dawn_dusk.csv",
     ),
@@ -53,17 +55,21 @@ function make_clips(
     # Load and group data frame by file
     gdf =
         DataFrame(CSV.File(preds_path)) |>
-        x -> assert_not_empty(x, preds_path) |>
-        x -> rename_column!(x, "1.0", "kiwi") |>
-        x -> assert_detections_present(x, location, trip_date) |>
-        filter_positives! |>
-        insert_datetime_column! |>
-        x -> exclude_daytime!(x, dawn_dusk_dict) |> 
-        group_by_file!
+        x ->
+            assert_not_empty(x, preds_path) |>
+            x ->
+                rename_column!(x, "1.0", "kiwi") |> #can remove now, needs to be label
+                x ->
+                    assert_detections_present(x, location, trip_date) |> # change to accept label
+                    filter_positives! |> # change to accept label
+                    insert_datetime_column! |>
+                    x -> exclude_daytime!(x, dawn_dusk_dict) |> #change to toggle day night or 24/7
+                    group_by_file! 
 
     # Make clip and spectrogram
     for (k, v) in pairs(gdf)
         file_name = chop(v.file[1], head = 2, tail = 4)
+        #file_name = path_to_file_string(v.file[1])
         start_times = v[!, :start_time] |> sort
 
         detections = cluster_detections(start_times)
@@ -112,10 +118,18 @@ end
 # assumes kiwi
 function filter_positives!(df::DataFrame)::DataFrame
     filter!(row -> row.kiwi > 0, df)
+    #filter!(row -> row.kiwi == 1, df)
+end
+
+function path_to_file_string(path::String)
+    #f = split(path, "/")[end] |> x -> split(x, ".") |> first
+    f = chop(file, head = 2, tail = 4)
+    return f
 end
 
 function filename_to_datetime!(file)::DateTime
     file_string = chop(file, head = 2, tail = 4)
+    #file_string = path_to_file_string(file)
     date_time =
         length(file_string) > 13 ? DateTime(file_string, dateformat"yyyymmdd_HHMMSS") :
         DateTime(
@@ -202,10 +216,9 @@ function get_image_from_sample(sample::Vector{Float64}, f)
     end
     image =
         DSP.pow2db.(i) |>
-        x -> x .+ abs(minimum(x)) |>
-        x -> x ./ maximum(x) |> 
-        x -> RGB.(x) |> 
-        x -> imresize(x, 224, 224)
+        x ->
+            x .+ abs(minimum(x)) |>
+            x -> x ./ maximum(x) |> x -> RGB.(x) |> x -> imresize(x, 224, 224)
     return image
 end
 
