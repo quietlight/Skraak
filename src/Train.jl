@@ -16,7 +16,6 @@ function train(
     batch_size::Int64 = 64,
 )
 
-
 Note:
 Dont forget temp env,  julia -t 4
 Assumes 224x224 pixel RGB images as png's
@@ -34,36 +33,46 @@ Model = Union{Bool,String}
 function train(
     model_name::String,
     train_epochs::Int64,
-    glob_pattern::String="*/*.png",
-    pretrain::Model=true,
+    glob_pattern::String = "*/*.png",
+    pretrain::Model = true,
     train_test_split::Float64 = 0.8,
     batch_size::Int64 = 64,
-)   
+)
     epochs = 1:train_epochs
     images = glob(glob_pattern) |> shuffle! |> x -> x[1:500]
     @assert !isempty(images) "No png images found"
     @info "$(length(images)) images in dataset"
-    
+
     label_to_index = labels_to_dict(images)
     @info "Text labels translate to: " label_to_index
     classes = length(label_to_index)
     @assert classes >= 2 "At least 2 label classes are required, for example: kiwi, not_kiwi"
     @info "$classes classes in dataset"
     @info "Device: $device"
-    
+
     ceiling = ceiling(length(images), batch_size)
     train_test_index = train_test_index(ceiling, batch_size, train_test_split)
-    
+
     train, train_sample, test = process_data(images, train_test_index, ceiling, batch_size)
     @info "Made data loaders"
-    
+
     model = load_model(pretrain, classes)
     @info "Loaded model"
     opt = Flux.setup(Flux.Optimisers.Adam(1e-5), model)
     @info "Setup optimiser"
-    
+
     @info "Training for $epochs epochs: " now()
-    training_loop!(model, opt, train, train_sample, test, epochs, model_name, classes, label_to_index)
+    training_loop!(
+        model,
+        opt,
+        train,
+        train_sample,
+        test,
+        epochs,
+        model_name,
+        classes,
+        label_to_index,
+    )
     @info "Finished $(last(epochs)) epochs: " now()
 end
 
@@ -82,18 +91,24 @@ function ceiling(n::Int, batch_size::Int)
 end
 
 function train_test_index(ceiling::Int, batch_size::Int, train_test_split::Float64)::Int
-    t = ceiling ÷ batch_size * train_test_split |>
+    t =
+        #! format: off
+        ceiling ÷ batch_size * train_test_split |>
         round |>
         x -> x * batch_size |> 
         x -> convert(Int, x)
+        #! format: on
 end
-    
-function labels_to_dict(list::Vector{String})::Dict{String, Int32}
-    l = map(x -> split(x, "/")[end-1], list) |> 
-        unique |> 
+
+function labels_to_dict(list::Vector{String})::Dict{String,Int32}
+    l =
+        #! format: off
+        map(x -> split(x, "/")[end-1], list) |>
+        unique |>
         sort |>
-        x -> zip(x, 1:length(x)) |>
+        x -> zip(x, 1:length(x)) |> 
         Dict
+        #! format: on
     return l
 end
 
@@ -102,7 +117,8 @@ device = CUDA.functional() ? gpu : cpu
 function process_data(array_of_file_names, train_test_index, ceiling, batch_size)
     seed!(1234)
     images = shuffle!(array_of_file_names)
-    train = ImageContainer(images[1:train_test_index]) |> x -> make_dataloader(x, batch_size)
+    train =
+        ImageContainer(images[1:train_test_index]) |> x -> make_dataloader(x, batch_size)
     train_sample =
         ValidationImageContainer(images[1:(ceiling-train_test_index)]) |>
         x -> make_dataloader(x, batch_size)
@@ -118,13 +134,14 @@ length(data::ValidationImageContainer) = length(data.img)
 function getindex(data::ImageContainer{Vector{String}}, index::Int)
     path = data.img[index]
     img =
+        #! format: off
         Images.load(path) |>
         #x -> Images.imresize(x, 224, 224) |>
-        x ->
-            Noise.add_gauss(x, (rand() * 0.2)) |>
-            x ->
-                apply_mask!(x, 3, 3, 12) |>
-                x -> collect(channelview(float32.(x))) |> x -> permutedims(x, (3, 2, 1))
+        x -> Noise.add_gauss(x, (rand() * 0.2)) |>
+        x -> apply_mask!(x, 3, 3, 12) |>
+        x -> collect(channelview(float32.(x))) |> 
+        x -> permutedims(x, (3, 2, 1))
+        #! format: on
     y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
     return img, y
 end
@@ -132,9 +149,12 @@ end
 function getindex(data::ValidationImageContainer{Vector{String}}, index::Int)
     path = data.img[index]
     img =
+        #! format: off
         Images.load(path) |>
         #x -> Images.imresize(x, 224, 224) |>
-        x -> collect(channelview(float32.(x))) |> x -> permutedims(x, (3, 2, 1))
+        x -> collect(channelview(float32.(x))) |> 
+        x -> permutedims(x, (3, 2, 1))
+        #! format: on
     y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
     return img, y
 end
@@ -224,9 +244,9 @@ function train_epoch!(model; opt, train, classes)
 end
 
 function dict_to_text_file(dict, model_name)
-    text=""
+    text = ""
     for (key, value) in dict
-        text=text*"$(key) => $(value)\n"
+        text = text * "$(key) => $(value)\n"
     end
     open("labels_$(model_name)-$(today()).txt", "w") do file
         write(file, text)
@@ -243,9 +263,8 @@ function training_loop!(
     epochs::UnitRange{Int64},
     model_name::String,
     classes,
-    label_to_index
+    label_to_index,
 )
-    
     @time eval, vcm = evaluate(model, test)
     @info "warm up" accuracy = eval
     @info "warm up" vcm

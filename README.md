@@ -40,7 +40,7 @@ Currently grayscale RGB spectrogram images are used. Colour spectrogram images a
 
 Julia is great for machine learning because it is realtively simple to get a GPU working. It does have disadvantages at GPT-4 scale, but for this kind of work it is excelent. Julia shines with any scientific computing task.
 
-Skraak is much more stable than Opensoundscape/Python when training on many millions of images. Avianz/Python has some good ideas, such as JSON labels, but unfortunately it is close to useless when it comes to training models, if you manage to install it in the first place. Python sucks, package management is perpetually broken, it fails as a tool for getting work done efficiently, intelligent life moved on a long time ago.
+Skraak is much more stable than Opensoundscape/Python when training on many millions of images. Avianz/Python has some good ideas, such as JSON labels, but unfortunately it is close to useless when it comes to training models, if you manage to install it in the first place.
 
 
 

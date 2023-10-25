@@ -60,19 +60,16 @@ function get_image_from_sample_for_inference(sample, f)
         replace!(i, 0.0 => l[2])
     end
     image =
+        #! format: off
         DSP.pow2db.(i) |>
-        x ->
-            x .+ abs(minimum(x)) |>
-            x ->
-                x ./ maximum(x) |>
-                x ->
-                    Float32.(x) |>
-                    x ->
-                        RGB.(x) |>
-                        x ->
-                            imresize(x, 224, 224) |>
-                            channelview |>
-                            x -> permutedims(x, (2, 3, 1))
+        x -> x .+ abs(minimum(x)) |>
+        x -> x ./ maximum(x) |>
+        x -> Float32.(x) |>
+        x -> RGB.(x) |>
+        x -> imresize(x, 224, 224) |>
+        channelview |>
+        x -> permutedims(x, (2, 3, 1))
+        #! format: on
     return image
 end
 
@@ -397,7 +394,7 @@ from datetime import datetime
 model = load_model('/home/david/best.model')
 
 # folders =  glob('./*/2023-?????/')
-folders =  glob('./*/2023-09-11/')
+folders =  glob('./*/2023-10-19/')
 for folder in folders:
     os.chdir(folder)
     print(folder, ' start: ', datetime.now())
@@ -409,8 +406,8 @@ for folder in folders:
             overlap_fraction = 0.5,
             batch_size =  128,
             num_workers = 12)
-    scores.to_csv("scores-2023-09-11.csv")
-    preds.to_csv("preds-2023-09-11.csv")
+    scores.to_csv("scores-2023-10-19.csv")
+    preds.to_csv("preds-2023-10-19.csv")
     os.chdir('../..')
     print(folder, ' done: ', datetime.now())
     print()

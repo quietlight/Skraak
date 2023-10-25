@@ -1,16 +1,32 @@
 # Utility.jl
 
-using CSV, DataFrames, Dates, DBInterface, DSP, DuckDB, Glob, HTTP, Images, JSON, PNGFiles, Random, SHA, TimeZones, WAV, XMLDict 
+using CSV,
+    DataFrames,
+    Dates,
+    DBInterface,
+    DSP,
+    DuckDB,
+    Glob,
+    HTTP,
+    Images,
+    JSON,
+    PNGFiles,
+    Random,
+    SHA,
+    TimeZones,
+    WAV,
+    XMLDict
 
-export back_one_hour!,
+export move_one_hour!,
     check_png_wav_both_present,
     file_metadata_to_df,
     resize_image!,
     twilight_tuple_local_time,
-    utc_to_nzdt!
+    utc_to_nzdt!,
+    move_clips_to_folders
 
 """
-move_one_hour!(files::Vector{String})
+move_one_hour!(files::Vector{String}, operator)
 
 This function takes a vector of file paths and renames each file in the
 vector by changing the name of the file to the name of the file created one
@@ -28,7 +44,9 @@ Returns: Nothing - This function only renames files and saves them.
 
 I use this to turn the clock back at the end of daylight saving.
 """
+
 function move_one_hour!(files::Vector{String}, operator)
+    @assert operator == (+) || operator == (-)
     fix_extension_of_files = []
     for old_file in files
         # Extract the date and time of the original file using string chopping
@@ -115,7 +133,7 @@ Then using duckdb cli from SSD:
 duckdb AudioData.duckdb
 show tables;
 SELECT * FROM pomona_files;
-COPY pomona_files FROM '/media/david/Pomona-3/Pomona-3/pomona_files_20230722.csv';
+COPY pomona_files FROM '/media/david/Pomona-3/Pomona-3/pomona_files_20231019.csv';
 SELECT * FROM pomona_files;
 
 Then backup with:
@@ -324,8 +342,6 @@ function file_metadata_to_df()
     return df
 end
 
-
-
 """
 resize_image!(name::String, x::Int64=224, y::Int64=224)
 
@@ -487,5 +503,35 @@ function utc_to_nzdt!(files::Vector{String})
     print("Tidy\n")
 end
 
+"""
+move_clips_to_folders(df::DataFrame)
 
-
+Takes a 2 column dataframe: file, label
+file must be list of png images, assumes wav's are there too
+will move mp4's from video folder if they are present
+"""
+function move_clips_to_folders(df::DataFrame)
+    p = glob("*.png")
+    w = glob("*.[W,w][A,a][V,v]")
+    @assert (first(df.file) |> x -> split(x, ".")[end] |> x -> x == "png") "df.file must be a list of png's"
+    @assert issetequal(df.file, p) "All png files in dataframe must be present in folder"
+    @assert issetequal(chop.(df.file, head = 0, tail = 4), chop.(w, head = 0, tail = 4)) "There must be a wav for every png in the dataframe"
+    for row in eachrow(df)
+        src = row.file
+        dst = "$(row.label)/$(row.file)"
+        mkpath("$(row.label)/")
+        try
+            mv(src, dst)
+            mv(chop(src, tail = 3) * "wav", chop(dst, tail = 3) * "wav")
+            if isdir(video)
+                mkpath("video/$(row.label)/")
+                mv(
+                    "video/" * chop(src, tail = 3) * "mp4",
+                    "video/" * chop(dst, tail = 3) * "mp4",
+                )
+            end
+        catch e
+            @info e
+        end
+    end
+end
