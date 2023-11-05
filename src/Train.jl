@@ -23,12 +23,12 @@ Saves jld2's in current directory
 
 Use like:
 using Skraak
-glob_pattern = "Clips_2023-09-11/[D,F,M,N]/*.png" #from SSD1
-label_to_index = Dict{String,Int32}("D" => 1, "F" => 2, "M" => 3, "N" => 4)
+glob_pattern = "Clips_2023-09-11/[D,F,M,N]/*.png" #from SSD2/Clips
 train("Test", 2, glob_pattern, false  )
 train("Test2", 2, glob_pattern, "/media/david/SSD1/model_K1-3_CPU_epoch-10-0.9965-2023-10-18T17:32:36.747.jld2")
-train("Test3", 2, glob_pattern, "/Volumes/SSD1/model_DFMN1-1_CPU_epoch-11-0.9126-2023-10-20T08/42/32.533.jld2")
+train("Test3", 2, glob_pattern, "/Volumes/SSD1/model_DFMN1-1_CPU_epoch-11-0.9126-2023-10-20T08:42:32.533.jld2")
 =#
+const LABELTOINDEX::Dict{String,Int32} = Dict()
 Model = Union{Bool,String}
 function train(
     model_name::String,
@@ -44,14 +44,15 @@ function train(
     @info "$(length(images)) images in dataset"
 
     label_to_index = labels_to_dict(images)
+    register_label_to_index!(label_to_index)
     @info "Text labels translate to: " label_to_index
     classes = length(label_to_index)
     @assert classes >= 2 "At least 2 label classes are required, for example: kiwi, not_kiwi"
     @info "$classes classes in dataset"
     @info "Device: $device"
 
-    ceiling = ceiling(length(images), batch_size)
-    train_test_index = train_test_index(ceiling, batch_size, train_test_split)
+    ceiling = ceil(length(images), batch_size)
+    train_test_index = train_test_idx(ceiling, batch_size, train_test_split)
 
     train, train_sample, test = process_data(images, train_test_index, ceiling, batch_size)
     @info "Made data loaders"
@@ -86,11 +87,11 @@ end
 
 Container = Union{ImageContainer,ValidationImageContainer}
 
-function ceiling(n::Int, batch_size::Int)
+function ceil(n::Int, batch_size::Int)
     return n ÷ batch_size * batch_size
 end
 
-function train_test_index(ceiling::Int, batch_size::Int, train_test_split::Float64)::Int
+function train_test_idx(ceiling::Int, batch_size::Int, train_test_split::Float64)::Int
     t =
         #! format: off
         ceiling ÷ batch_size * train_test_split |>
@@ -110,6 +111,20 @@ function labels_to_dict(list::Vector{String})::Dict{String,Int32}
         Dict
         #! format: on
     return l
+end
+
+"""
+    register_label_to_index!(label_to_index::Dict{String,Int32})
+
+    This will replace the content of the global variable LABELTOINDEX 
+    with the content intended by the caller.
+
+    Thanks algunion
+    https://discourse.julialang.org/t/dataloader-scope-troubles/105207/4
+"""
+function register_label_to_index!(label_to_index::Dict{String,Int32})
+    empty!(LABELTOINDEX)
+    merge!(LABELTOINDEX, label_to_index)
 end
 
 device = CUDA.functional() ? gpu : cpu
@@ -142,7 +157,8 @@ function getindex(data::ImageContainer{Vector{String}}, index::Int)
         x -> collect(channelview(float32.(x))) |> 
         x -> permutedims(x, (3, 2, 1))
         #! format: on
-    y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
+    #y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
+    y = LABELTOINDEX[(split(path, "/")[end-1])]
     return img, y
 end
 
@@ -155,7 +171,8 @@ function getindex(data::ValidationImageContainer{Vector{String}}, index::Int)
         x -> collect(channelview(float32.(x))) |> 
         x -> permutedims(x, (3, 2, 1))
         #! format: on
-    y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
+    #y = label_to_index[(split(path, "/")[end-1])] #not sure this is in scope
+    y = LABELTOINDEX[(split(path, "/")[end-1])]
     return img, y
 end
 
@@ -206,6 +223,7 @@ function load_model(pretrain::Bool, classes::Int64)
     return model
 end
 
+#If model classes == desired classes I can leave out the last step, TODO.
 function load_model(model_path::String, classes::Int64)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])

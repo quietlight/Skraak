@@ -12,7 +12,7 @@ Since Skraak works on colour images, it can potentially be used for identifying 
 
 __Skraak is intended to be simple to use for simple people like me.__
 
-It is a good idea to use an Nvidia GPU. Everything should work fine on CPU, just slow slow slow. AMD GPU's are not supported but should be easy for you to get working.
+It is a good idea to use an Nvidia GPU. Everything should work fine on CPU, just slow. AMD GPU's are not supported but should be easy for you to get working.
 
 ```
 1. Take some WAV's organised into a file structure LOCATION/TRIP_DATE/WAV_FILES 
@@ -34,13 +34,13 @@ It is a good idea to use an Nvidia GPU. Everything should work fine on CPU, just
 9. Repeat,iterating on your models as you accumulate more data. It's hard until it gets easy.
 ```
 
-Managing datasets is like gardening, it takes some weeding and a _lot_ of shit (aka data) to get a good model growing. 
+Managing datasets is like gardening, it takes some weeding and a _lot_ of compost (aka data) to get a good model growing. 
 
 Currently grayscale RGB spectrogram images are used. Colour spectrogram images add no new information, yet strangely train fastest. During inference, when looking for calls in raw data, many millions of images need to be generated on the fly, applying the colour layer is very time intensive, so I compromise on (grayscale) RGB images for use with pretrained models for fast-ish training, and fast-ish inference using grayscale (RGB) images.
 
 Julia is great for machine learning because it is realtively simple to get a GPU working. It does have disadvantages at GPT-4 scale, but for this kind of work it is excelent. Julia shines with any scientific computing task.
 
-Skraak is much more stable than Opensoundscape/Python when training on many millions of images. Avianz/Python has some good ideas, such as JSON labels, but unfortunately it is close to useless when it comes to training models, if you manage to install it in the first place.
+Skraak is much more stable than Opensoundscape/Python when training on many millions of images. Avianz/Python has some good ideas, such as JSON labels.
 
 
 

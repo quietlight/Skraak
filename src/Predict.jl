@@ -65,8 +65,8 @@ function get_image_from_sample_for_inference(sample, f)
         x -> x .+ abs(minimum(x)) |>
         x -> x ./ maximum(x) |>
         x -> RGB.(x) |>
-        x -> imresize(x, 224, 224) |>
-        x -> Float32.(x) #|>
+        x -> imresize(x, 224, 224) #|>
+        #x -> Float32.(x) #|>
         #channelview |>
         #x -> permutedims(x, (2, 3, 1))
         #! format: on
@@ -85,12 +85,12 @@ function get_images(file::String, increment::Int = 5, divisor::Int = 2) #5s samp
     split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
     raw_images = ThreadsX.map(x -> get_image_from_sample_for_inference(x, f), split_signal)
     n_samples = length(raw_images)
-    return images, n_samples
+    return raw_images, n_samples
 end
 
 function get_images_time_from_wav(file::String, increment::Int = 5, divisor::Int = 2)
     raw_images, n_samples = get_images(file::String, increment, divisor)
-    images = reshape_images(raw_images)
+    images = reshape_images(raw_images, n_samples)
 
     start_time = 0:(increment/divisor):(n_samples-1)*(increment/divisor)
     end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
@@ -98,14 +98,14 @@ function get_images_time_from_wav(file::String, increment::Int = 5, divisor::Int
     return images, time
 end
 
-function reshape_images(raw_images)
+function reshape_images(raw_images, n_samples)
     images =
         #! format: off
         hcat(raw_images...) |>
         x -> reshape(x, (224, 224, n_samples)) |>
         channelview |>
-        x -> permutedims(x, (2, 3, 1, 4)) #|> 
-        #x -> Float32.(x)
+        x -> permutedims(x, (2, 3, 1, 4)) |> 
+        x -> Float32.(x)
         #! format: on
     return images
 end
