@@ -1,6 +1,6 @@
 # Predict.jl
 
-using WAV, DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2
+using WAV, DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2, FLAC
 
 export predict
 
@@ -65,19 +65,25 @@ function get_image_from_sample_for_inference(sample, f)
         x -> x .+ abs(minimum(x)) |>
         x -> x ./ maximum(x) |>
         x -> RGB.(x) |>
-        x -> imresize(x, 224, 224) #|>
-        #x -> Float32.(x) #|>
-        #channelview |>
-        #x -> permutedims(x, (2, 3, 1))
+        x -> imresize(x, 224, 224) |>
+        x -> collect(channelview(float32.(x))) |> 
+        x -> permutedims(x, (3, 2, 1))
         #! format: on
     return image
 end
 
 function get_images(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
-    signal, freq = wavread(file)
-    if freq > 16000.0f0
+    ext = split(file, ".")[end]
+    @assert ext in ["WAV", "wav", "flac"] "Unsupported audio file type, requires wav or flac."
+    if ext in ["WAV", "wav"]
+        signal, freq = wavread(file)
+    else
+        signal, freq = load(file)
+    end
+
+    if freq > 16000
         signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
-        freq = 16000.0f0
+        freq = 16000
     end
     f = convert(Int, freq)
     inc = increment * f
@@ -102,10 +108,7 @@ function reshape_images(raw_images, n_samples)
     images =
         #! format: off
         hcat(raw_images...) |>
-        x -> reshape(x, (224, 224, n_samples)) |>
-        channelview |>
-        x -> permutedims(x, (2, 3, 1, 4)) |> 
-        x -> Float32.(x)
+        x -> reshape(x, (224, 224, 3, n_samples))
         #! format: on
     return images
 end
@@ -115,7 +118,7 @@ function predict_file(file::String, folder::String, model)
     @info "File: $file"
     @time images, time = get_images_time_from_wav(file)
     data = images |> device
-    @time predictions = model(data) |> x -> Flux.onecold(x)
+    @time predictions = Flux.onecold(model(data))
     f = (repeat(["$file"], length(time)))
     df = DataFrame(
         :file => f,
