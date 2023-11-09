@@ -1,14 +1,14 @@
 module Skraak
 
-export make_clips, aggregate_labels, audiodata_db
+export make_clips, move_clips_to_folders, aggregate_labels, audiodata_db
 
 include("Train.jl")
 include("Predict.jl")
 include("Utility.jl")
 
 using CSV, DataFrames, Dates, DSP, Glob, JSON, Random, TimeZones, WAV, PNGFiles, Images #Plots
-import DataFramesMeta: @transform!, @subset!, @byrow, @passmissing
-
+#import DataFramesMeta: @transform!, @subset!, @byrow, @passmissing
+using DataFramesMeta
 """
 make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
 
@@ -43,7 +43,7 @@ using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 # Assumes function run from Pomona-1 or Pomona-2
 function make_clips(
     preds_path::String,
-    #label::Int,
+    label::Int = 1,
     #night::,
     dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}} = construct_dawn_dusk_dict(
         "/media/david/SSD1/dawn_dusk.csv",
@@ -54,18 +54,16 @@ function make_clips(
 
     # Load and group data frame by file
     gdf =
+        #! format: off
         DataFrame(CSV.File(preds_path)) |>
-        x ->
-            assert_not_empty(x, preds_path) |>
-            x ->
-                rename_column!(x, "1.0", "kiwi") |> #can remove now, needs to be label
-                x ->
-                    assert_detections_present(x, location, trip_date) |> # change to accept label
-                    filter_positives! |> # change to accept label
-                    insert_datetime_column! |>
-                    x -> exclude_daytime!(x, dawn_dusk_dict) |> #change to toggle day night or 24/7
-                    group_by_file! 
-
+        x -> assert_not_empty(x, preds_path) |>
+        x -> rename_column!(x, "1.0", "label") |> #can remove now, needs to be label
+        x -> assert_detections_present(x, label, location, trip_date) |>
+        x -> filter_positives!(x, label) |>
+        insert_datetime_column! |>
+        x -> exclude_daytime!(x, dawn_dusk_dict) |> #change to toggle day night or 24/7
+        group_by_file!
+        #! format: on
     # Make clip and spectrogram
     for (k, v) in pairs(gdf)
         file_name = chop(v.file[1], head = 2, tail = 4)
@@ -110,15 +108,21 @@ end
 
 # assumes kiwi, binary classifier from opensoundscape
 # needed to remove ::String annotation for location, trip_date to make it work
-function assert_detections_present(df::DataFrame, location, trip_date)::DataFrame
-    1.0 in levels(df.kiwi) ? (return df) :
-    @error "No kiwi detections at $location/$trip_date"
+function assert_detections_present(
+    df::DataFrame,
+    label::Int,
+    location,
+    trip_date,
+)::DataFrame
+    label in levels(df.label) ? (return df) :
+    @error "No detections for label = $label at $location/$trip_date"
 end
 
 # assumes kiwi
-function filter_positives!(df::DataFrame)::DataFrame
-    filter!(row -> row.kiwi > 0, df)
-    #filter!(row -> row.kiwi == 1, df)
+function filter_positives!(df::DataFrame, label)::DataFrame
+    #filter!(row -> row.kiwi > 0, df)
+    filter!(row -> row.label == label, df)
+    return df
 end
 
 function path_to_file_string(path::String)
@@ -215,10 +219,14 @@ function get_image_from_sample(sample::Vector{Float64}, f)
         replace!(i, 0.0 => l[2])
     end
     image =
+        #! format: off
         DSP.pow2db.(i) |>
-        x ->
-            x .+ abs(minimum(x)) |>
-            x -> x ./ maximum(x) |> x -> RGB.(x) |> x -> imresize(x, 224, 224)
+        x -> x .+ abs(minimum(x)) |>
+        x -> x ./ maximum(x) |>
+        x -> reverse(x, dims = 1) |>
+        x -> RGB.(x) |> 
+        x -> imresize(x, 224, 224)
+        #! format: on
     return image
 end
 
@@ -265,7 +273,40 @@ end
 
 #######################################################################
 
-#INBETWEEN STEP: use secondary model to sort clips, move clips into D, F, M, N, and hand classify, classify into COF, Noise, geneerate csv's.
+#INBETWEEN STEP: use secondary model to sort clips, move clips into D, F, M, N, and hand classify, generate actual.csv.
+
+"""
+move_clips_to_folders(df::DataFrame)
+
+Takes a 2 column dataframe: file, label
+file must be list of png images, assumes wav's are there too
+will move mp4's from video folder if they are present
+"""
+function move_clips_to_folders(df::DataFrame)
+    p = glob("*.png")
+    w = glob("*.[W,w][A,a][V,v]")
+    @assert (first(df.file) |> x -> split(x, ".")[end] |> x -> x == "png") "df.file must be a list of png's"
+    @assert issetequal(df.file, p) "All png files in dataframe must be present in folder"
+    @assert issetequal(chop.(df.file, head = 0, tail = 4), chop.(w, head = 0, tail = 4)) "There must be a wav for every png in the dataframe"
+    for row in eachrow(df)
+        src = row.file
+        dst = "$(row.label)/$(row.file)"
+        mkpath("$(row.label)/")
+        try
+            mv(src, dst)
+            mv(chop(src, tail = 3) * "wav", chop(dst, tail = 3) * "wav")
+            if isdir(video)
+                mkpath("video/$(row.label)/")
+                mv(
+                    "video/" * chop(src, tail = 3) * "mp4",
+                    "video/" * chop(dst, tail = 3) * "mp4",
+                )
+            end
+        catch e
+            @info e
+        end
+    end
+end
 
 #=
 actual_mfdn must be list of qualified file names D/C05-2023-04-15-20230219_223000-380-470.png etc

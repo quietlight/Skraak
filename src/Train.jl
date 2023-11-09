@@ -51,7 +51,7 @@ function train(
     @info "$classes classes in dataset"
     @info "Device: $device"
 
-    ceiling = ceil(length(images), batch_size)
+    ceiling = seil(length(images), batch_size)
     train_test_index = train_test_idx(ceiling, batch_size, train_test_split)
 
     train, train_sample, test = process_data(images, train_test_index, ceiling, batch_size)
@@ -87,7 +87,7 @@ end
 
 Container = Union{ImageContainer,ValidationImageContainer}
 
-function ceil(n::Int, batch_size::Int)
+function seil(n::Int, batch_size::Int)
     return n ÷ batch_size * batch_size
 end
 
@@ -216,6 +216,7 @@ function make_dataloader(container::Container, batch_size::Int)
     return data
 end
 
+# see load_model() from predict, and below
 function load_model(pretrain::Bool, classes::Int64)
     fst = Metalhead.ResNet(18, pretrain = pretrain).layers
     lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
@@ -223,7 +224,9 @@ function load_model(pretrain::Bool, classes::Int64)
     return model
 end
 
-#If model classes == desired classes I can leave out the last step, TODO.
+#If model classes == desired classes I don't empty the last layer
+#That means that I can just train from where I left off for new data, DFMN model
+#Could be a gotcha if I want to train a different 4 class model, no need for a switch just yet
 function load_model(model_path::String, classes::Int64)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])
@@ -231,9 +234,13 @@ function load_model(model_path::String, classes::Int64)
     l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
     m = Flux.Chain(f[1], l)
     Flux.loadmodel!(m, model_state)
-    fst = m.layers
-    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
-    model = Flux.Chain(fst[1], lst) |> device
+    if classes == model_classes
+        model = m |> device
+    else
+        fst = m.layers
+        lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
+        model = Flux.Chain(fst[1], lst) |> device
+    end
     return model
 end
 

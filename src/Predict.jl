@@ -1,17 +1,20 @@
 # Predict.jl
 
-using WAV, DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2, FLAC
+using WAV,
+    DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2, FLAC, Glob
+import Base: length, getindex
+#using DataFramesMeta
 
 export predict
 
 """
 predict(glob_pattern::String, model::String)
 
-This function takes a glob pattern for folders to run over, and a model path. It saves results in a csv for each folder, similar to opensoundscape
+This function takes a glob pattern for folders (or a vector of folders) to run over, and a model path. It saves results in a csv in each folder, similar to opensoundscape
 
 Args:
 
-•  glob pattern (folder/)
+•  glob pattern (folder/) or a vector of folders
 •  model path
 
 Returns: Nothing - This function saves csv files.
@@ -24,7 +27,7 @@ From Pomona-3/Pomona-3/
 
 Use like:
 using Skraak
-glob_pattern = "*/2023-10-19/" #from SSD1
+glob_pattern = "*/2023-10-19/"
 model = "/media/david/SSD1/model_K1-3_CPU_epoch-10-0.9965-2023-10-18T17:32:36.747.jld2"
 predict(glob_pattern, model)
 """
@@ -49,30 +52,37 @@ function predict(folders::Vector{String}, model::String)
 end
 
 #~~~~~ The guts ~~~~~#
+struct PredictImageContainer{T<:Vector}
+    img::T
+end
+
+length(data::PredictImageContainer) = length(data.img)
+
+function getindex(data::PredictImageContainer{Vector{String}}, idx::Int)
+    path = data.img[idx]
+    img =
+        #! format: off
+        Images.load(path) |>
+        x -> Images.imresize(x, 224, 224) |>
+        x -> collect(channelview(float32.(x))) |>
+        x -> permutedims(x, (3, 2, 1))
+        #! format: on
+    return img, path
+end
 
 device = CUDA.functional() ? gpu : cpu
 
-function get_image_from_sample_for_inference(sample, f)
-    S = DSP.spectrogram(sample, 400, 2; fs = f)
-    i = S.power
-    if minimum(i) == 0.0
-        l = i |> vec |> unique |> sort
-        replace!(i, 0.0 => l[2])
-    end
+function get_image_for_inference(sample, f)
     image =
         #! format: off
-        DSP.pow2db.(i) |>
-        x -> x .+ abs(minimum(x)) |>
-        x -> x ./ maximum(x) |>
-        x -> RGB.(x) |>
-        x -> imresize(x, 224, 224) |>
+        get_image_from_sample(sample, f) |>
         x -> collect(channelview(float32.(x))) |> 
         x -> permutedims(x, (3, 2, 1))
         #! format: on
     return image
 end
 
-function get_images(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
+function load_audio_file(file::String)
     ext = split(file, ".")[end]
     @assert ext in ["WAV", "wav", "flac"] "Unsupported audio file type, requires wav or flac."
     if ext in ["WAV", "wav"]
@@ -80,28 +90,44 @@ function get_images(file::String, increment::Int = 5, divisor::Int = 2) #5s samp
     else
         signal, freq = load(file)
     end
+    return signal, freq
+end
 
+function resample_to_16000hz(signal, freq)
+    signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
+    freq = 16000
+    return signal, freq
+end
+
+function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
+    signal, freq = load_audio_file(file)
     if freq > 16000
-        signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
-        freq = 16000
+        signal, freq = resample_to_16000hz(signal, freq)
     end
     f = convert(Int, freq)
     inc = increment * f
     hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
     split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
-    raw_images = ThreadsX.map(x -> get_image_from_sample_for_inference(x, f), split_signal)
+    raw_images = ThreadsX.map(x -> get_image_for_inference(x, f), split_signal)
     n_samples = length(raw_images)
     return raw_images, n_samples
 end
 
-function get_images_time_from_wav(file::String, increment::Int = 5, divisor::Int = 2)
-    raw_images, n_samples = get_images(file::String, increment, divisor)
+function audio_loader(file::String, increment::Int = 5, divisor::Int = 2)
+    raw_images, n_samples = get_images_from_audio(file::String, increment, divisor)
     images = reshape_images(raw_images, n_samples)
 
     start_time = 0:(increment/divisor):(n_samples-1)*(increment/divisor)
     end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
     time = collect(zip(start_time, end_time))
-    return images, time
+
+    loader = Flux.DataLoader(
+        (data = images, time = time),
+        batchsize = n_samples,
+        shuffle = false,
+    )
+    l = loader |> device
+    return l
 end
 
 function reshape_images(raw_images, n_samples)
@@ -113,25 +139,45 @@ function reshape_images(raw_images, n_samples)
     return images
 end
 
-function predict_file(file::String, folder::String, model)
+function predict_audio_file(file::String, model)
     #check form of opensoundscape preds.csv and needed by my make_clips
     @info "File: $file"
-    @time images, time = get_images_time_from_wav(file)
-    data = images |> device
-    @time predictions = Flux.onecold(model(data))
+    @time data = audio_loader(file)
+    pred = []
+    time = []
+    @time for (x, t) in data
+        p = Flux.onecold(model(x))
+        append!(pred, p)
+        append!(time, t)
+    end
     f = (repeat(["$file"], length(time)))
     df = DataFrame(
         :file => f,
         :start_time => first.(time),
         :end_time => last.(time),
-        :label => predictions,
+        :label => pred,
     )
+    sort!(df)
     return df
 end
 
 function predict_folder(folder::String, model)
-    files = glob("$folder/*.[W,w][A,a][V,v]")
-    @info "$(length(files)) files in $folder"
+    wav = glob("$folder/*.[W,w][A,a][V,v]")
+    flac = glob("$folder/*.flac")
+    audio_files = vcat(wav, flac) #if wav and flac both present will predict on all
+    png_files = glob("$folder/*.png")
+    #it will predict on images when both images and audio present
+    if isempty(png_files)
+        predict_audio_folder(audio_files, model, folder)
+    else
+        predict_image_folder(png_files, model, folder)
+    end
+end
+
+function predict_audio_folder(audio_files::Vector{String}, model, folder::String)
+    l = length(audio_files)
+    @assert (l > 0) "No wav or flac audio files present in $folder"
+    @info "$(l) audio_files in $folder"
     df = DataFrame(
         file = String[],
         start_time = Float64[],
@@ -140,12 +186,46 @@ function predict_folder(folder::String, model)
     )
     save_path = "$folder/preds-$(today()).csv"
     CSV.write("$save_path", df)
-    for file in files
-        df = predict_file(file, folder, model)
+    for file in audio_files
+        df = predict_audio_file(file, model)
         CSV.write("$save_path", df, append = true)
     end
 end
 
+function predict_image_folder(png_files::Vector{String}, model, folder::String)
+    l = length(png_files)
+    @assert (l > 0) "No png files present in $folder"
+    @info "$(l) png_files in $folder"
+    save_path = "$folder/preds-$(today()).csv"
+    loader = png_loader(png_files)
+    @time preds, files = predict_pngs(model, loader)
+    df = DataFrame(file = files, label = preds)
+    CSV.write("$save_path", df)
+end
+
+function png_loader(png_files::Vector{String})
+    loader = Flux.DataLoader(
+        PredictImageContainer(png_files);
+        batchsize = 64,
+        collate = true,
+        parallel = true,
+    )
+    device == gpu ? loader = CuIterator(loader) : nothing
+    return loader
+end
+
+function predict_pngs(m, d)
+    pred = []
+    path = []
+    for (x, pth) in d
+        p = Flux.onecold(m(x))
+        append!(pred, p)
+        append!(path, pth)
+    end
+    return pred, path
+end
+
+# see load_model() from train, different input types
 function load_model(model_path::String)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])
@@ -162,226 +242,6 @@ function load_bson(model_path::String)
 end
 =#
 
-#~~~~~ How I got here ~~~~~#
-#= 
-#this works, runs on gpu but requires pre made images, nearly 8 million for C05 alone, inference time is in the ball park
-
-import Base: length
-import Base: getindex
-using Images
-using Flux
-using Metalhead
-using Glob
-using BSON
-using DataFrames, CSV
-using DataFramesMeta
-
-imgs = glob("SSD1/test/C05/2023-09-11/*/*.png")
-
-device = Flux.CUDA.functional() ? gpu : cpu
-
-struct ValidationImageContainer{T<:Vector}
-    img::T
-end
-
-data = ValidationImageContainer(imgs)
-
-length(data::ValidationImageContainer) = length(data.img)
-
-const im_size = (224, 224)
-
-function getindex(data::ValidationImageContainer{Vector{String}}, idx::Int)
-    path = data.img[idx]
-    img = Images.load(path) |>
-    		x -> channelview(float32.(x)) |>
-            x -> permutedims(x, (3, 2, 1))
-    return img, path
-end
-			#x -> Images.imresize(x, 224, 224) |> should already be 224x224
-            #x -> collect(channelview(float32.(RGB.(x)))) |> dont need RGB, already rgb
-    		#x -> collect(channelview(float32.(x))) |> why collect?
-
-# define DataLoaders
-const batch_size = 64
-
-deval = Flux.DataLoader(
-    ValidationImageContainer(imgs);
-    batchsize=batch_size,
-    collate = true,
-    parallel = true,
-)
-device == gpu ? deval = Flux.CuIterator(deval) : nothing
-
-BSON.@load "/media/david/SSD2/model_K1-2_CPU_epoch-7-0.9968-2023-09-28T06:50:04.328.bson" model
-model = model |> device
-
-function eval_f(m, d)
-    pred = []
-    path = []
-    for (x, pth) in d
-        p = Flux.onecold(m(x))
-        append!(pred, p)
-        append!(path, pth)
-    end
-    return pred, path
-end
-
-@time preds, files  = eval_f(model, deval)
-
-df = DataFrame(file=files, label=preds)
-@transform!(df, @byrow :file=replace(:file, "SSD1/test/C05/2023-09-11" => "."))
-@transform!(df, @byrow :label = :label == 2 ? 0.0 : 1.0)
-@rename! df :"1.0"=:label
-@transform!(df, @byrow :start_time=split(:file, "/")[end] |> x -> chop(x, head=0, tail=4) |> x -> parse(Float64, x)/10)
-@transform!(df, @byrow :end_time=:start_time+5.0)
-@transform!(df, @byrow :file=replace(:file, r"/(\d+)\.png" => ".WAV"))
-@select!(df, :file, :start_time, :end_time, :"1.0")
-sort!(df)
-CSV.write("/media/david/SSD1/preds-K1-2-2023-09-28_C05.csv", df)
-#
-@transform!(df4, @byrow :key=:file * "-" * "$(:start_time)")
-@transform!(df3, @byrow :key=:file * "-" * "$(:start_time)")
-df5=outerjoin(df3, df4, on = :key, makeunique=true)
-CSV.write("/media/david/SSD1/join.csv", df5)
-#
-
-#
-Load model first
-
-predict_folder("folder", model)
-This is slow
-===================================
-#
-using CSV, DataFrames, DSP, Glob, Images, GLMakie, PNGFiles, WAV, Flux, Metalhead, BSON, ProgressMeter, CUDA, ThreadsX #, JLD2, Plots
-
-BSON.@load "/media/david/SSD2/model_K1-2_CPU_epoch-7-0.9968-2023-09-28T06:50:04.328.bson" model
-model |> gpu
-
-a=glob("C05/2023-09-11/")
-for folder in a
-    predict_folder(folder, model)
-end
-
-function predict_folder(folder::String, model)
-	files=glob("$folder/*.[W,w][A,a][V,v]")
-	#check form of opensoundscape preds.csv and needed by my make_clips
-	f=[]
-	t=[]
-	l=[]
-	@showprogress for file in files ######
-		@info file
-		images, time = get_images(file)
-		images |> gpu
-	 	@time predictions = Flux.onecold(model(images))
-	 	append!(t, time)
-	 	append!(l, predictions)
-	 	append!(f, (repeat(["$file"], length(time))))
-	end
-	df=DataFrame(:file=>f, :start_time=>first.(t), :end_time=>last.(t), :label=>l)
-	CSV.write("$folder/preds-K1-2-2023-09-28_GLMakie.csv", df)
-	@info "saved $folder/preds-K1-2-2023-09-28_GLMakie.csv"
-end
-
-#efficient, gray but RGB
-#using TerminalExtensions to see image
-function get_image_from_sample(st, en, signal, f)
-	sample = signal[st:en]
-	S = DSP.spectrogram(sample[:, 1], 400, 2; fs = f)
-	image=DSP.pow2db.(S.power) |>
-		x -> LinearAlgebra.normalize(x) |>
-		x -> RGB.(x) |>
-		x -> imresize(x, 224, 224)
-	return image
-end
-
-# new, now ThreadsX works its faster. converting to float32 makes inference faster
-function get_images(file::String)
-	signal, freq = wavread(file)
-	if freq > 16000.0f0
-		signal = DSP.resample(signal, 16000.0f0/freq; dims=1)
-		freq = 16000.0f0
-	end
-	length_signal = length(signal)
-	f=convert(Int, freq)
-	increment = 5*f-1
-	hop = f*5÷2 #need guarunteed Int
-	start=1
-	time = []
-	chop = []
-	while start + increment <= length_signal
-		push!(time, ((start - 1)/f, (start + increment)/f))
-		push!(chop, (start, (start + increment)))
-		start += hop
-	end
-	@time raw_images = ThreadsX.map(x -> get_image_from_sample(first(x), last(x), signal, f), chop)
-	images = hcat(raw_images...) |>
-		x -> reshape(x, (224, 224, length(raw_images))) |>
-		channelview |>
-		x -> permutedims(x, (2, 3, 1, 4)) |>
-		x -> Float32.(x)
-
-	return images, time
-end
-
-# old: non map function. converting to float32 makes inference faster
-function get_images(file::String)
-	signal, freq = wavread(file)
-	f=convert(Int, freq)
-	if f > 16000
-		signal = DSP.resample(signal, 16000/f; dims=1)
-		f = 16000
-	end
-	length_signal = length(signal)
-	increment = 5*f-1
-	hop = f*5÷2 #need guarunteed Int
-
-	raw_images = [] #in form to pass model
-	time = []
-
-	start=1
-	@time while start + increment <= length_signal
-	get_image_from_sample(start, (start + increment), signal, f) |>
-		x -> push!(raw_images, x)
-	push!(time, ((start - 1)/f, (start + increment)/f))
-	start += hop
-	end
-
-	images = hcat(raw_images...) |>
-		x -> reshape(x, (224, 224, length(raw_images))) |>
-		channelview |>
-		x -> permutedims(x, (2, 3, 1, 4)) |>
-		x -> Float32.(x)
-
-	return images, time
-end
-
-# uses Plots, slow slow NO
-function get_image_from_sample(st, en, signal, f)
-	sample = signal[st:en]
-	S = DSP.spectrogram(sample[:, 1], 400, 2; fs = f)
-	plot=Plots.heatmap(S.time, S.freq, pow2db.(S.power), size = (225, 225), showaxis = false, ticks = false, legend = false, thickness_scaling = 0 );
-	buffer = PipeBuffer()
-	Plots.png(plot, buffer) #Slow, slow, slow!
-	image = PNGFiles.load(buffer)
-	size(image) == (224, 224) ? nothing : image = Images.imresize(image, 224, 224)
-	return image
-end
-
-#using GlMakie, also slow
-function get_image_from_sample(st, en, signal, f)
-	sample = signal[st:en]
-	S = DSP.spectrogram(sample[:, 1], 400, 2; fs = f)
-	f = GLMakie.Figure(resolution = (224, 224), figure_padding = 0)
-	ax = GLMakie.Axis(f[1, 1], spinewidth=0)
-	GLMakie.hidedecorations!(ax)
-	GLMakie.heatmap!(ax, (DSP.pow2db.(S.power))', colormap = :inferno)
-	buffer = PipeBuffer()
-	GLMakie.show(buffer, MIME"image/png"(), f)
-	image = PNGFiles.load(buffer)
-	return image
-end
-
-=#
 ############### PYTHON Opensoundscape ################
 #=
 # Dont forget conda activate opensoundscape
@@ -404,7 +264,7 @@ from datetime import datetime
 model = load_model('/home/david/best.model')
 
 # folders =  glob('./*/2023-?????/')
-folders =  glob('./*/2023-10-19/')
+folders =  glob('./*/*/')
 for folder in folders:
     os.chdir(folder)
     print(folder, ' start: ', datetime.now())
@@ -416,8 +276,8 @@ for folder in folders:
             overlap_fraction = 0.5,
             batch_size =  128,
             num_workers = 12)
-    scores.to_csv("scores-2023-10-19.csv")
-    preds.to_csv("preds-2023-10-19.csv")
+    scores.to_csv("scores-2023-11-07.csv")
+    preds.to_csv("preds-2023-11-07.csv")
     os.chdir('../..')
     print(folder, ' done: ', datetime.now())
     print()

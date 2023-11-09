@@ -22,8 +22,7 @@ export move_one_hour!,
     file_metadata_to_df,
     resize_image!,
     twilight_tuple_local_time,
-    utc_to_nzdt!,
-    move_clips_to_folders
+    utc_to_nzdt!
 
 """
 move_one_hour!(files::Vector{String}, operator)
@@ -45,6 +44,7 @@ Returns: Nothing - This function only renames files and saves them.
 I use this to turn the clock back at the end of daylight saving.
 """
 
+#Assumes WAV files
 function move_one_hour!(files::Vector{String}, operator)
     @assert operator == (+) || operator == (-)
     fix_extension_of_files = []
@@ -501,37 +501,4 @@ function utc_to_nzdt!(files::Vector{String})
         mv(item[1], item[2])
     end
     print("Tidy\n")
-end
-
-"""
-move_clips_to_folders(df::DataFrame)
-
-Takes a 2 column dataframe: file, label
-file must be list of png images, assumes wav's are there too
-will move mp4's from video folder if they are present
-"""
-function move_clips_to_folders(df::DataFrame)
-    p = glob("*.png")
-    w = glob("*.[W,w][A,a][V,v]")
-    @assert (first(df.file) |> x -> split(x, ".")[end] |> x -> x == "png") "df.file must be a list of png's"
-    @assert issetequal(df.file, p) "All png files in dataframe must be present in folder"
-    @assert issetequal(chop.(df.file, head = 0, tail = 4), chop.(w, head = 0, tail = 4)) "There must be a wav for every png in the dataframe"
-    for row in eachrow(df)
-        src = row.file
-        dst = "$(row.label)/$(row.file)"
-        mkpath("$(row.label)/")
-        try
-            mv(src, dst)
-            mv(chop(src, tail = 3) * "wav", chop(dst, tail = 3) * "wav")
-            if isdir(video)
-                mkpath("video/$(row.label)/")
-                mv(
-                    "video/" * chop(src, tail = 3) * "mp4",
-                    "video/" * chop(dst, tail = 3) * "mp4",
-                )
-            end
-        catch e
-            @info e
-        end
-    end
 end
