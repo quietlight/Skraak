@@ -66,8 +66,8 @@ function make_clips(
         #! format: on
     # Make clip and spectrogram
     for (k, v) in pairs(gdf)
-        file_name = chop(v.file[1], head = 2, tail = 4)
-        #file_name = path_to_file_string(v.file[1])
+        #file_name = chop(v.file[1], head = 2, tail = 4)
+        file_name = path_to_file_string(v.file[1])
         start_times = v[!, :start_time] |> sort
 
         detections = cluster_detections(start_times)
@@ -125,15 +125,15 @@ function filter_positives!(df::DataFrame, label)::DataFrame
     return df
 end
 
-function path_to_file_string(path::String)
-    #f = split(path, "/")[end] |> x -> split(x, ".") |> first
-    f = chop(file, head = 2, tail = 4)
+function path_to_file_string(path) #becareful path::String won't work: no method matching path_to_file_string(::InlineStrings.String31) line 70
+    f = split(path, "/")[end] |> x -> split(x, ".") |> first
+    #f = chop(file, head = 2, tail = 4)
     return f
 end
 
 function filename_to_datetime!(file)::DateTime
-    file_string = chop(file, head = 2, tail = 4)
-    #file_string = path_to_file_string(file)
+    #file_string = chop(file, head = 2, tail = 4)
+    file_string = path_to_file_string(file)
     date_time =
         length(file_string) > 13 ? DateTime(file_string, dateformat"yyyymmdd_HHMMSS") :
         DateTime(
