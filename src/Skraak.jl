@@ -362,7 +362,7 @@ duckdb AudioData.duckdb
 COPY pomona_labels_20230418 FROM 'Clips_2023-07-22/pomona_labels.csv';
 
 Then backup with:
-EXPORT DATABASE 'AudioDataBackup_2023-09-11';
+EXPORT DATABASE 'AudioDataBackup_2023-10-10';
 .quit
 Then quit and backup using cp on the db file, dated copy
 

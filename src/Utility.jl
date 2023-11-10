@@ -117,12 +117,12 @@ end
 #=
 used like:
 using Glob, Skraak, CSV
-folders=glob("*/2023-09-11*/")
+folders=glob("*/2023-11-02/")
 for folder in folders
 cd(folder)
     try
         df = Skraak.file_metadata_to_df()
-        CSV.write("/media/david/Pomona-3/Pomona-3/pomona_files.csv", df; append=true)
+        CSV.write("/media/david/Pomona-3/Pomona-3/pomona_files_20231102.csv", df; append=true)
     catch
         @warn "error with $folder"
     end
