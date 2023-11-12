@@ -63,7 +63,8 @@ function getindex(data::PredictImageContainer{Vector{String}}, idx::Int)
     img =
         #! format: off
         Images.load(path) |>
-        x -> Images.imresize(x, 224, 224) |>
+        x -> Images.imresize(x, 224, 224)|>
+        x -> Images.RGB.(x) |>
         x -> collect(channelview(float32.(x))) |>
         x -> permutedims(x, (3, 2, 1))
         #! format: on
@@ -86,10 +87,11 @@ function load_audio_file(file::String)
     ext = split(file, ".")[end]
     @assert ext in ["WAV", "wav", "flac"] "Unsupported audio file type, requires wav or flac."
     if ext in ["WAV", "wav"]
-        signal, freq = wavread(file)
+        signal, freq = WAV.wavread(file)
     else
         signal, freq = load(file)
     end
+    @assert !isempty(signal[:, 1]) "$file seems to be empty, could it be corrupted?\nYou could delete it, or replace it with a known\ngood version from SD card or backup."
     return signal, freq
 end
 
@@ -122,12 +124,12 @@ function audio_loader(file::String, increment::Int = 5, divisor::Int = 2)
     time = collect(zip(start_time, end_time))
 
     loader = Flux.DataLoader(
-        (data = images, time = time),
+        (images, time),
         batchsize = n_samples,
         shuffle = false,
     )
-    l = loader |> device
-    return l
+    device == gpu ? loader = CuIterator(loader) : nothing #check this works with gpu
+    return loader
 end
 
 function reshape_images(raw_images, n_samples)

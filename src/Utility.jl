@@ -103,10 +103,12 @@ function check_png_wav_both_present(folders::Vector{String})
     println("No matching wav: ")
     for folder in folders
         println(folder)
+        println("Missing wav:")
         p = glob("$folder/*.png")
         for png in p
             !isfile(chop(png, tail = 3) * "wav") && println(png)
         end
+        println("Missing png:")
         w = glob("$folder/*.[W,w][A,a][V,v]")
         for wav in w
             !isfile(chop(wav, tail = 3) * "png") && println(wav)

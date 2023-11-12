@@ -5,6 +5,7 @@ export make_clips, move_clips_to_folders, aggregate_labels, audiodata_db
 include("Train.jl")
 include("Predict.jl")
 include("Utility.jl")
+include("dawn_dusk_dict.jl")
 
 using CSV, DataFrames, Dates, DSP, Glob, JSON, Random, TimeZones, WAV, PNGFiles, Images #Plots
 #import DataFramesMeta: @transform!, @subset!, @byrow, @passmissing
@@ -33,7 +34,7 @@ end
 
 if needed to change headers in preds csv
 shift, control, f in subl
-file,start_time,end_time,0.0,1.0
+file,start_time,end_time,label
 /media/david/Pomona-2,<project filters>, preds-2023-02-27.csv
 file,start_time,end_time,absent,present
 
@@ -41,13 +42,12 @@ using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
 # Assumes run on linux
 # Assumes function run from Pomona-1 or Pomona-2
+#dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv",),
 function make_clips(
     preds_path::String,
     label::Int = 1,
-    #night::,
-    dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}} = construct_dawn_dusk_dict(
-        "/media/david/SSD1/dawn_dusk.csv",
-    ),
+    night::Bool = true,
+    dawn_dusk_dict = dddict,
 )
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(preds_path, "/")
@@ -61,7 +61,7 @@ function make_clips(
         x -> assert_detections_present(x, label, location, trip_date) |>
         x -> filter_positives!(x, label) |>
         insert_datetime_column! |>
-        x -> exclude_daytime!(x, dawn_dusk_dict) |> #change to toggle day night or 24/7
+        x -> night_or_day!(x, dawn_dusk_dict, night) |> #true=night, false=day
         group_by_file!
         #! format: on
     # Make clip and spectrogram
@@ -79,7 +79,9 @@ function make_clips(
         for detection in detections
             st, en = calculate_clip_start_end(detection, freq, length_signal)
             name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
-            outfile = "/home/david/Upload/$name"
+            f = "Clips_$(today())"
+            mkpath(f)
+            outfile = "$f/$name"
 
             sample = signal[Int(st):Int(en)]
             wavwrite(sample, "$outfile.wav", Fs = Int(freq))
@@ -149,11 +151,13 @@ function insert_datetime_column!(df::DataFrame)::DataFrame
 end
 
 # calls night(), needs dawn_dusk_dict in local time format
-function exclude_daytime!(
+function night_or_day!(
     df::DataFrame,
     dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}},
+    night::Bool = true,
 )::DataFrame
-    @subset!(df, @byrow night(:DateTime, dawn_dusk_dict))
+    night ? @subset!(df, @byrow night(:DateTime, dawn_dusk_dict)) :
+    @subset!(df, @byrow !night(:DateTime, dawn_dusk_dict))
     return df
 end
 
@@ -358,11 +362,13 @@ CSV.write("pomona_labels.csv", df; header=false)
 
 audiodata_db(df, "pomona_labels_20230418") NOT_WORKING maybe titles
 to use cli, need to remove header row
-duckdb AudioData.duckdb
+duckdb /media/david/SSD1/AudioData.duckdb
 COPY pomona_labels_20230418 FROM 'Clips_2023-07-22/pomona_labels.csv';
+COPY pomona_labels_20230418 FROM 'pomona_labels.csv';
+#COPY pomona_files FROM 'pomona_files_20231102.csv';
 
 Then backup with:
-EXPORT DATABASE 'AudioDataBackup_2023-10-10';
+EXPORT DATABASE 'AudioDataBackup_2023-11-11';
 .quit
 Then quit and backup using cp on the db file, dated copy
 
