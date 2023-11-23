@@ -23,8 +23,8 @@ Saves jld2's in current directory
 
 Use like:
 using Skraak
-glob_pattern = "2023-09-*/*/*/[N,K]/*.png" #from SSD2/PrimaryDataset
-train("K1-4", 15, glob_pattern, true, 0.95, 64)
+glob_pattern = "*/*/[N,K]/*.png" #from SSD2/PrimaryDataset 7758648
+train("K1-5", 2, glob_pattern, true, 0.95, 64)
 glob_pattern = "Clips_2023-09-11/[D,F,M,N]/*.png" #from SSD2/Clips
 train("Test", 2, glob_pattern, false)
 train("Test2", 2, glob_pattern, "/media/david/SSD1/model_K1-3_CPU_epoch-10-0.9965-2023-10-18T17:32:36.747.jld2")
@@ -43,7 +43,7 @@ function train(
     batch_size::Int64 = 64,
 )
     epochs = 1:train_epochs
-    images = glob(glob_pattern) |> shuffle! #|> x -> x[1:500]
+    images = glob(glob_pattern) |> shuffle! |> x -> x[1:1000]
     @assert !isempty(images) "No png images found"
     @info "$(length(images)) images in dataset"
 
@@ -137,8 +137,7 @@ function process_data(array_of_file_names, train_test_index, ceiling, batch_size
     seed!(1234)
     images = shuffle!(array_of_file_names)
     train =
-        ImageContainer(images[1:train_test_index]) |> 
-        x -> make_dataloader(x, batch_size)
+        ImageContainer(images[1:train_test_index]) |> x -> make_dataloader(x, batch_size)
     train_sample =
         ValidationImageContainer(images[1:(ceiling-train_test_index)]) |>
         x -> make_dataloader(x, batch_size)
@@ -156,8 +155,8 @@ function getindex(data::ImageContainer{Vector{String}}, index::Int)
     img =
         #! format: off
         Images.load(path) |>
-        x -> Images.imresize(x, 224, 224) |>
-        x -> Images.RGB.(x) |>
+        #x -> Images.imresize(x, 224, 224) |>
+        #x -> Images.RGB.(x) |>
         x -> Noise.add_gauss(x, (rand() * 0.2)) |>
         x -> apply_mask!(x, 3, 3, 12) |>
         x -> collect(channelview(float32.(x))) |> 
@@ -172,8 +171,8 @@ function getindex(data::ValidationImageContainer{Vector{String}}, index::Int)
     img =
         #! format: off
         Images.load(path) |>
-        x -> Images.imresize(x, 224, 224) |>
-        x -> Images.RGB.(x) |>
+        #x -> Images.imresize(x, 224, 224) |>
+        #x -> Images.RGB.(x) |>
         x -> collect(channelview(float32.(x))) |> 
         x -> permutedims(x, (3, 2, 1))
         #! format: on

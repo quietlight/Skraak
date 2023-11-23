@@ -4,12 +4,13 @@ export make_clips, move_clips_to_folders, aggregate_labels, audiodata_db
 
 include("Train.jl")
 include("Predict.jl")
+#include("ConstructPrimaryDataset.jl")
 include("Utility.jl")
 include("dawn_dusk_dict.jl")
 
-using CSV, DataFrames, Dates, DSP, Glob, JSON, Random, TimeZones, WAV, PNGFiles, Images #Plots
+using CSV, DataFrames, DataFramesMeta, Dates, DSP, Glob, JSON, Random, TimeZones, WAV, PNGFiles, Images #Plots
 #import DataFramesMeta: @transform!, @subset!, @byrow, @passmissing
-using DataFramesMeta
+
 """
 make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
 
@@ -40,6 +41,7 @@ file,start_time,end_time,absent,present
 
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
 """
+
 # Assumes run on linux
 # Assumes function run from Pomona-1 or Pomona-2
 #dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv",),
@@ -154,9 +156,9 @@ end
 function night_or_day!(
     df::DataFrame,
     dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}},
-    night::Bool = true,
+    night_time::Bool = true,
 )::DataFrame
-    night ? @subset!(df, @byrow night(:DateTime, dawn_dusk_dict)) :
+    night_time ? @subset!(df, @byrow night(:DateTime, dawn_dusk_dict)) :
     @subset!(df, @byrow !night(:DateTime, dawn_dusk_dict))
     return df
 end
@@ -215,7 +217,7 @@ end
 =#
 
 # f neeeds to be an Int
-function get_image_from_sample(sample::Vector{Float64}, f)
+function get_image_from_sample(sample, f) #sample::Vector{Float64}
     S = DSP.spectrogram(sample, 400, 2; fs = convert(Int, f))
     i = S.power
     if minimum(i) == 0.0
@@ -313,13 +315,18 @@ function move_clips_to_folders(df::DataFrame)
 end
 
 #=
-actual_mfdn must be list of qualified file names D/C05-2023-04-15-20230219_223000-380-470.png etc
+actual.csv must be list of qualified png file names: 
+D/C05-2023-04-15-20230219_223000-380-470.png
+
 using Glob, DataFrames, CSV
 a=glob("[M,F,D,N]/*.png")
-mfdn_df = DataFrame(file=a)
-CSV.write("actual_mfdn.csv", mfdn_df)
+df = DataFrame(file=a)
+CSV.write("actual_mfdn.csv", df)
 
 make a folder D,F,M,N
+mkpath.(["D", "F", "M", "N"])
+
+move wavs to match pngs
 df=DataFrame(CSV.File("actual_mfdn.csv"))
 for row in eachrow(df)
    src=split(row.file, "/")[2]
@@ -328,47 +335,45 @@ for row in eachrow(df)
    mv(chop(src, tail=3)*"wav", chop(dst, tail=3)*"wav")
 end
 =#
+
+#run from parent folder of label folders
+#saves actual.csv and returns a df
+#labels=["D", "F", "M", "N"]
+function actual_from_folders(labels::Vector{String})::DataFrame
+    paths=String[]
+    for l in labels
+        paths=append!(paths, glob("$l/*.png"))
+    end
+    df = DataFrame(file=paths)
+    CSV.write("actual.csv", df)
+    return df
+end
+
 """
-aggregate_labels(actual="actual_mfdn.csv", cof="predicted_cof.csv", noise="predicted_noise.csv", outfile="pomona_labels.csv")
+aggregate_labels(actual="actual.csv", outfile="labels.csv")
 
 file
 [D, F, M, N]/C05-2023-04-15-20230219_223000-380-470.png
 
-file	label
-D/C05-2023-04-15-20230219_223000-380-470.png	C
-D/C05-2023-04-15-20230220_000000-670-715.png	O
-D/C05-2023-04-15-20230221_050000-435-473.png	F
+This function takes the csv output from my hand classification and ouputs a df, and csv for insertion into AudioData.duckdb using the duckdb cli or using DFto.audiodata_db()
 
-file	label
-D/C05-2023-04-15-20230219_223000-380-470.png	L
-D/C05-2023-04-15-20230220_000000-670-715.png	M
-D/C05-2023-04-15-20230221_050000-435-473.png	H
-D/C05-2023-04-15-20230221_053000-810-850.png	T
-
-This function prepares the csv output from my hand classification and secondary models and ouputs a df, and csv for insertion into AudioData.duckdb using the duckdb cli or using DFto.audiodata_db()
-
-assumes run from Clips_xxxx-xx-xx folder and that actual_mfdn.csv, predicted_cof.csv, predicted_noise.csv, and that
-assumes file names if not specified
+assumes run from Clips_xxxx-xx-xx folder and that "actual.csv" present if not specified.
 returns a dataframe
-
 
 using CSV, DataFrames, DataFramesMeta
 """
 #=
 df=aggregate_labels()
-CSV.write("pomona_labels.csv", df)
-or
-CSV.write("pomona_labels.csv", df; header=false)
 
 audiodata_db(df, "pomona_labels_20230418") NOT_WORKING maybe titles
 to use cli, need to remove header row
+
 duckdb /media/david/SSD1/AudioData.duckdb
-COPY pomona_labels_20230418 FROM 'Clips_2023-07-22/pomona_labels.csv';
-COPY pomona_labels_20230418 FROM 'pomona_labels.csv';
-#COPY pomona_files FROM 'pomona_files_20231102.csv';
+COPY pomona_labels_20230418 FROM 'DB_Labels/pomona_labels_2023-11-02.csv';
+COPY pomona_files FROM 'DB_Files/pomona_files_20231102.csv';
 
 Then backup with:
-EXPORT DATABASE 'AudioDataBackup_2023-11-11';
+EXPORT DATABASE 'AudioDataBackup_2023-11-14';
 .quit
 Then quit and backup using cp on the db file, dated copy
 
@@ -382,29 +387,20 @@ using Franklin
 serve()
 
 =#
+# New one, without noise and distance, does not do :box anymore therefore requires new db schema
 function aggregate_labels(
-    actual::String = "actual_mfdn.csv",
-    cof::String = "predicted_cof.csv",
-    noise::String = "predicted_noise.csv",
-    outfile::String = "pomona_labels.csv",
+    actual::String = "actual.csv",
+    outfile::String = "labels.csv",
+    hdr::Bool = false #header for outfile 
 )::DataFrame
-    a = DataFrame(CSV.File(actual))
-    c = DataFrame(CSV.File(cof))
-    rename!(c, :label => :distance)
-    n = DataFrame(CSV.File(noise))
-    rename!(n, :label => :noise)
+    df = DataFrame(CSV.File(actual))
 
-    # make unique true not needed now I have renamed label column, but will help later maybe, in case of duplicate label names.
-    x = leftjoin(a, c, on = :file)
-    df = leftjoin(x, n, on = :file, makeunique = true)
-
-    # location, f, box
+    # location, f, start_time, end_time
     @transform!(df, @byrow :location = split(split(:file, "/")[2], "-")[1])
     @transform!(df, @byrow :f = split(split(:file, "/")[2], "-")[5] * ".WAV")
-    @transform!(
-        df,
-        @byrow :box = "[$(split(split(:file, "/")[2], "-")[end-1]), $(chop(split(split(:file, "/")[2], "-")[end], tail=4))]"
-    )
+    @transform!( df, @byrow :start_time = split(split(:file, "/")[2], "-")[end-1])
+    @transform!( df, @byrow :end_time = chop(split(split(:file, "/")[2], "-")[end], tail=4))
+    #@transform!( df, @byrow :box = "[$(split(split(:file, "/")[2], "-")[end-1]), $(chop(split(split(:file, "/")[2], "-")[end], tail=4))]")
 
     # male, female, duet, not
     @transform!(df, @byrow @passmissing :male = split(:file, "/")[1] == "M" ? true : false)
@@ -426,22 +422,11 @@ function aggregate_labels(
             split(:file, "/")[1] in ["KA", "KE", "Q"] ? split(:file, "/")[1] : missing
     )
 
-    # distance
-    @transform!(df, @byrow @passmissing :close_call = :distance == "C" ? true : false)
-    @transform!(df, @byrow @passmissing :ok_call = :distance == "O" ? true : false)
-    @transform!(df, @byrow @passmissing :far_call = :distance == "F" ? true : false)
-
-    # noise
-    @transform!(df, @byrow @passmissing :low_noise = :noise == "L" ? true : false)
-    @transform!(df, @byrow @passmissing :medium_noise = :noise == "M" ? true : false)
-    @transform!(df, @byrow @passmissing :high_noise = :noise == "H" ? true : false)
-    @transform!(df, @byrow @passmissing :terrible_noise = :noise == "T" ? true : false)
-
     # remove unwanted cols, rename f to file
-    select!(df, Not([:file, :distance, :noise]))
+    select!(df, Not([:file]))
     rename!(df, :f => :file)
 
-    CSV.write(outfile, df)
+    CSV.write(outfile, df; header=hdr)
     return df
 end
 

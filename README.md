@@ -21,13 +21,13 @@ __You can use Skraak too.__
 
 cd to your Skraak folder
 start the julia repl with $julia
+(You will want to install Revise and OhMyREPL, just do 'using Revise, OhMyREPL' in the Julia repl, add 'using Revise, OhMyREPL' to ~/.julia/config/startup.jl)
+
 type: ] (to enter Pkg mode)
 type: activate .
 type: instantiate
 backspace to exit Pkg mode
 exit repl with ctrl-D.
-
-(You will want to install Revise and OhMyREPL, just do 'using Revise, OhMyREPL' in the Julia repl, add 'using Revise, OhMyREPL' to ~/.julia/config/startup.jl)
 ```
 
 Later:

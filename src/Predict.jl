@@ -28,7 +28,7 @@ From Pomona-3/Pomona-3/
 Use like:
 using Skraak
 glob_pattern = "*/2023-10-19/"
-model = "/media/david/SSD1/model_K1-3_CPU_epoch-10-0.9965-2023-10-18T17:32:36.747.jld2"
+model = "/media/david/SSD1/model_K1-4_CPU_epoch-10-0.984-2023-11-20.jld2"
 predict(glob_pattern, model)
 """
 
@@ -101,6 +101,8 @@ function resample_to_16000hz(signal, freq)
     return signal, freq
 end
 
+# need to change divisor to a overlap fraction, chech interaction with audioloader()
+# if divisor is 0, then no overlap atm
 function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
     signal, freq = load_audio_file(file)
     if freq > 16000
@@ -108,7 +110,8 @@ function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 
     end
     f = convert(Int, freq)
     inc = increment * f
-    hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
+    #hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
+    hop = f * increment / divisor |> x -> x == Inf ? 0 : trunc(Int, x)
     split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
     raw_images = ThreadsX.map(x -> get_image_for_inference(x, f), split_signal)
     n_samples = length(raw_images)
@@ -123,11 +126,7 @@ function audio_loader(file::String, increment::Int = 5, divisor::Int = 2)
     end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
     time = collect(zip(start_time, end_time))
 
-    loader = Flux.DataLoader(
-        (images, time),
-        batchsize = n_samples,
-        shuffle = false,
-    )
+    loader = Flux.DataLoader((images, time), batchsize = n_samples, shuffle = false)
     device == gpu ? loader = CuIterator(loader) : nothing #check this works with gpu
     return loader
 end
@@ -201,7 +200,8 @@ function predict_image_folder(png_files::Vector{String}, model, folder::String)
     save_path = "$folder/preds-$(today()).csv"
     loader = png_loader(png_files)
     @time preds, files = predict_pngs(model, loader)
-    df = DataFrame(file = files, label = preds)
+    f = split.(files, "/") |> x -> last.(x)
+    df = DataFrame(file = f, label = preds)
     CSV.write("$save_path", df)
 end
 
@@ -217,6 +217,7 @@ function png_loader(png_files::Vector{String})
 end
 
 function predict_pngs(m, d)
+    @info "Predicting..."
     pred = []
     path = []
     for (x, pth) in d
@@ -278,8 +279,8 @@ for folder in folders:
             overlap_fraction = 0.5,
             batch_size =  128,
             num_workers = 12)
-    scores.to_csv("scores-2023-11-07.csv")
-    preds.to_csv("preds-2023-11-07.csv")
+    scores.to_csv("scores-2023-11-13.csv")
+    preds.to_csv("preds-2023-11-13.csv")
     os.chdir('../..')
     print(folder, ' done: ', datetime.now())
     print()
