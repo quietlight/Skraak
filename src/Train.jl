@@ -1,8 +1,10 @@
 # Train.jl
+#test commit
 
 import Base: length, getindex
-using CUDA, DataFrames, Dates, Images, Flux, FreqTables, Glob, JLD2, Metalhead, Noise
+using CUDA, DataFrames, Dates, Images, Flux, FreqTables, Glob, JLD2, Noise
 using Random: shuffle!, seed!
+using Metalhead: ResNet
 
 export train #beware Flux.train! is not Skraak.train
 
