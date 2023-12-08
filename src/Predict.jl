@@ -27,7 +27,7 @@ From Pomona-3/Pomona-3/
 
 Use like:
 using Skraak
-glob_pattern = "*/2023-10-19/"
+glob_pattern = "*/*/"
 model = "/media/david/SSD1/model_K1-4_CPU_epoch-10-0.984-2023-11-20.jld2"
 predict(glob_pattern, model)
 """

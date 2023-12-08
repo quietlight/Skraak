@@ -1,5 +1,4 @@
 # Train.jl
-#test commit
 
 import Base: length, getindex
 using CUDA, DataFrames, Dates, Images, Flux, FreqTables, Glob, JLD2, Noise
