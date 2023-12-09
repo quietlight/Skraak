@@ -10,7 +10,7 @@ Most of the skraak.kiwi data has been recorded using Open Acoustics AudioMoth's 
 
 It is a good idea to use an Nvidia GPU. Everything should work fine on CPU, just slow. 
 
-AMD GPU's are not supported but should be easy for you to get working. 
+AMD and Mac Silicone GPU's are not supported but should be easy for you to get working with julia AMD or Metal packages.
 
 If you are doing serious work, start the julia repl with: julia -t n  where n is up to 1/2 the number of cores you have. I do 4, this is enough to keep up with a gamer style GPU. 
 
@@ -43,7 +43,7 @@ When finished working you can if you like do 'free Skraak' in Pkg mode (accessed
 
 1. Take some WAV's organised into a file structure LOCATION/TRIP_DATE/WAV_FILES 
 2. and labels saved in a csv in the form:
-    * file(String),start_time,end_time,label(Int) (where start_time and end_time are in seconds from the start of the wav file)
+    * file(String),start_time,end_time,label(Integer) (where start_time and end_time are in seconds from the start of the wav file)
     * at least 2 label classes are required, for example Kiwi, Not
 3. Generate a primary dataset of spectrogram images with the following file structure:
     * DATASET/AUDIO_FILE*/LABEL*/PNG's (png files must be 224X224 px square, Grayscale or RGB). 
@@ -53,14 +53,14 @@ When finished working you can if you like do 'free Skraak' in Pkg mode (accessed
     * and saves a flac copy for reference
 > I use labels, [K, N] in words [Kiwi, Not]. Anything will work, the unique text labels are sorted alphabetically and mapped to integer labels in the training process. 
 > More than 2 label classes is fine, but keep it simple until you have a lot of data.
-> It is better __not__ to have everything in 2 big folders, 100_000 files in a folder on a Fat32 removable drive will rapidly grind to a stand still. 
+> It is better __not__ to have everything in big folders, 100_000 files in a folder on a Fat32 removable drive will rapidly grind to a stand still. 
 > You could have many thousands of K and N folders, for example, the model does not care.
 > Native file systems on mac/linux will work ok. I use ext4 (linux) file systems on exteranl SSD's for both linux and mac.
 ```
 
 ```
 
-4. Train a Resnet18 model, either pretrained on Imagenet, or preferably the pretrained Skraak Kiwi model, which is currently trained on 7_400_000 images.
+4. Train a Resnet18 model, either pretrained on Imagenet, or preferably the pretrained Skraak Kiwi model, which is currently trained on 7_700_000 images.
 Skraak trains on 5 second clips, converted to 224x224 pixel RGB spectrogram images.
 ```
 using Skraak
@@ -81,13 +81,13 @@ train("Test2", 2, glob_pattern_2, "path/to/model.jld2")
 # integer mapping.
 ```
 5. Run inference on raw data using a trained model
-Skraak will try to find png images first, in the folders covered by the glob pattern. If there are no png's found it will predict on wav or flac files, using 5 second audio clips, converted to 224x224 pixel RGB spectrogram images, with a 2.5 recond hop. 
+Skraak will try to find png images first, in the folders covered by the glob pattern. If there are no png's found it will predict on wav or flac files, using 5 second audio clips, converted to 224x224 pixel RGB spectrogram images, with a 2.5 second hop. 
 > You are responsible for providing an appropriate model. 
 > I use a binary Kiwi/Not model for finding calls in audio data, and a Duet/Female/Male/Not model on png clips made from calls detected by the binary model.
 > Find some models to start with in the Models folder
 ```
 using Skraak
-glob_pattern = "Clips/" #Note: requires folders as input. Folders contain flac, wav or png files.
+glob_pattern = "*/*/" #Note: requires folders as input. Folders contain flac, wav or png files.
 
 # Predict label classes of png, wav or flac files found in folders specified by 
 # glob_pattern using model.jld2. A preds.csv file is saved in current directory
@@ -108,7 +108,7 @@ make_clips("preds.csv", 1)
 I will not document this until the DuckDB storage api has stabilised. 
 For now always store a csv backup using "EXPORT DATABASE 'Backup_2023-10-10';" in the duckdb cli.
 I highly recommend storing data in a duckdb database.
-Querying a duckdb database with SQL is faster than even julia DataFrames.
+Querying a duckdb database with SQL is faster than even julia DataFrames, both leave Pandas in the dust.
 ```
 9. Repeat, iterating on your models as you accumulate more data. It's hard until it gets easy.
 

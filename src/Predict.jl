@@ -1,11 +1,10 @@
 # Predict.jl
 
+export predict
+
 using WAV,
     DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2, FLAC, Glob
 import Base: length, getindex
-#using DataFramesMeta
-
-export predict
 
 """
 predict(glob_pattern::String, model::String)
@@ -19,11 +18,14 @@ Args:
 
 Returns: Nothing - This function saves csv files.
 
-I use this function to find kiwi from new data gathered on a trip.
+I use this function to find kiwi from new data gathered on a trip. And to predict D/F/M/N for images clipped from primary detections.
+
+It works on both audio (wav or flac) and png images.
 
 Note:
-Dont forget temp env,  julia -t 4
 From Pomona-3/Pomona-3/
+julia -t 4
+Dont forget temp environment: ] activate --temp
 
 Use like:
 using Skraak
@@ -52,6 +54,39 @@ function predict(folders::Vector{String}, model::String)
 end
 
 #~~~~~ The guts ~~~~~#
+# see load_model() from train, different input types
+function load_model(model_path::String)
+    model_state = JLD2.load(model_path, "model_state")
+    model_classes = length(model_state[1][2][1][3][2])
+    f = Metalhead.ResNet(18, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
+    model = Flux.Chain(f[1], l)
+    Flux.loadmodel!(model, model_state)
+    return model
+end
+
+#=
+function load_bson(model_path::String)
+    BSON.@load model_path model
+end
+=#
+
+function predict_folder(folder::String, model)
+    wav = glob("$folder/*.[W,w][A,a][V,v]")
+    flac = glob("$folder/*.flac")
+    audio_files = vcat(wav, flac) #if wav and flac both present will predict on all
+    png_files = glob("$folder/*.png")
+    #it will predict on images when both images and audio present
+    if isempty(png_files)
+        predict_audio_folder(audio_files, model, folder)
+    else
+        predict_image_folder(png_files, model, folder)
+    end
+end
+
+device = CUDA.functional() ? gpu : cpu
+
+# Predict from png images
 struct PredictImageContainer{T<:Vector}
     img::T
 end
@@ -71,8 +106,6 @@ function getindex(data::PredictImageContainer{Vector{String}}, idx::Int)
     return img, path
 end
 
-device = CUDA.functional() ? gpu : cpu
-
 function get_image_for_inference(sample, f)
     image =
         #! format: off
@@ -81,116 +114,6 @@ function get_image_for_inference(sample, f)
         x -> permutedims(x, (3, 2, 1))
         #! format: on
     return image
-end
-
-function load_audio_file(file::String)
-    ext = split(file, ".")[end]
-    @assert ext in ["WAV", "wav", "flac"] "Unsupported audio file type, requires wav or flac."
-    if ext in ["WAV", "wav"]
-        signal, freq = WAV.wavread(file)
-    else
-        signal, freq = load(file)
-    end
-    @assert !isempty(signal[:, 1]) "$file seems to be empty, could it be corrupted?\nYou could delete it, or replace it with a known\ngood version from SD card or backup."
-    return signal, freq
-end
-
-function resample_to_16000hz(signal, freq)
-    signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
-    freq = 16000
-    return signal, freq
-end
-
-# need to change divisor to a overlap fraction, chech interaction with audioloader()
-# if divisor is 0, then no overlap atm
-function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
-    signal, freq = load_audio_file(file)
-    if freq > 16000
-        signal, freq = resample_to_16000hz(signal, freq)
-    end
-    f = convert(Int, freq)
-    inc = increment * f
-    #hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
-    hop = f * increment / divisor |> x -> x == Inf ? 0 : trunc(Int, x)
-    split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
-    raw_images = ThreadsX.map(x -> get_image_for_inference(x, f), split_signal)
-    n_samples = length(raw_images)
-    return raw_images, n_samples
-end
-
-function audio_loader(file::String, increment::Int = 5, divisor::Int = 2)
-    raw_images, n_samples = get_images_from_audio(file::String, increment, divisor)
-    images = reshape_images(raw_images, n_samples)
-
-    start_time = 0:(increment/divisor):(n_samples-1)*(increment/divisor)
-    end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
-    time = collect(zip(start_time, end_time))
-
-    loader = Flux.DataLoader((images, time), batchsize = n_samples, shuffle = false)
-    device == gpu ? loader = CuIterator(loader) : nothing #check this works with gpu
-    return loader
-end
-
-function reshape_images(raw_images, n_samples)
-    images =
-        #! format: off
-        hcat(raw_images...) |>
-        x -> reshape(x, (224, 224, 3, n_samples))
-        #! format: on
-    return images
-end
-
-function predict_audio_file(file::String, model)
-    #check form of opensoundscape preds.csv and needed by my make_clips
-    @info "File: $file"
-    @time data = audio_loader(file)
-    pred = []
-    time = []
-    @time for (x, t) in data
-        p = Flux.onecold(model(x))
-        append!(pred, p)
-        append!(time, t)
-    end
-    f = (repeat(["$file"], length(time)))
-    df = DataFrame(
-        :file => f,
-        :start_time => first.(time),
-        :end_time => last.(time),
-        :label => pred,
-    )
-    sort!(df)
-    return df
-end
-
-function predict_folder(folder::String, model)
-    wav = glob("$folder/*.[W,w][A,a][V,v]")
-    flac = glob("$folder/*.flac")
-    audio_files = vcat(wav, flac) #if wav and flac both present will predict on all
-    png_files = glob("$folder/*.png")
-    #it will predict on images when both images and audio present
-    if isempty(png_files)
-        predict_audio_folder(audio_files, model, folder)
-    else
-        predict_image_folder(png_files, model, folder)
-    end
-end
-
-function predict_audio_folder(audio_files::Vector{String}, model, folder::String)
-    l = length(audio_files)
-    @assert (l > 0) "No wav or flac audio files present in $folder"
-    @info "$(l) audio_files in $folder"
-    df = DataFrame(
-        file = String[],
-        start_time = Float64[],
-        end_time = Float64[],
-        label = Int[],
-    )
-    save_path = "$folder/preds-$(today()).csv"
-    CSV.write("$save_path", df)
-    for file in audio_files
-        df = predict_audio_file(file, model)
-        CSV.write("$save_path", df, append = true)
-    end
 end
 
 function predict_image_folder(png_files::Vector{String}, model, folder::String)
@@ -228,22 +151,103 @@ function predict_pngs(m, d)
     return pred, path
 end
 
-# see load_model() from train, different input types
-function load_model(model_path::String)
-    model_state = JLD2.load(model_path, "model_state")
-    model_classes = length(model_state[1][2][1][3][2])
-    f = Metalhead.ResNet(18, pretrain = false).layers
-    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
-    model = Flux.Chain(f[1], l)
-    Flux.loadmodel!(model, model_state)
-    return model
+# Predict from audio files
+function predict_audio_folder(audio_files::Vector{String}, model, folder::String)
+    l = length(audio_files)
+    @assert (l > 0) "No wav or flac audio files present in $folder"
+    @info "$(l) audio_files in $folder"
+    df = DataFrame(
+        file = String[],
+        start_time = Float64[],
+        end_time = Float64[],
+        label = Int[],
+    )
+    save_path = "$folder/preds-$(today()).csv"
+    CSV.write("$save_path", df)
+    for file in audio_files
+        df = predict_audio_file(file, model)
+        CSV.write("$save_path", df, append = true)
+    end
 end
 
-#=
-function load_bson(model_path::String)
-    BSON.@load model_path model
+function predict_audio_file(file::String, model)
+    #check form of opensoundscape preds.csv and needed by my make_clips
+    @info "File: $file"
+    @time data = audio_loader(file)
+    pred = []
+    time = []
+    @time for (x, t) in data
+        p = Flux.onecold(model(x))
+        append!(pred, p)
+        append!(time, t)
+    end
+    f = (repeat(["$file"], length(time)))
+    df = DataFrame(
+        :file => f,
+        :start_time => first.(time),
+        :end_time => last.(time),
+        :label => pred,
+    )
+    sort!(df)
+    return df
 end
-=#
+
+function audio_loader(file::String, increment::Int = 5, divisor::Int = 2)
+    raw_images, n_samples = get_images_from_audio(file::String, increment, divisor)
+    images = reshape_images(raw_images, n_samples)
+
+    start_time = 0:(increment/divisor):(n_samples-1)*(increment/divisor)
+    end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
+    time = collect(zip(start_time, end_time))
+
+    loader = Flux.DataLoader((images, time), batchsize = n_samples, shuffle = false)
+    device == gpu ? loader = CuIterator(loader) : nothing #check this works with gpu
+    return loader
+end
+
+function reshape_images(raw_images, n_samples)
+    images =
+        #! format: off
+        hcat(raw_images...) |>
+        x -> reshape(x, (224, 224, 3, n_samples))
+        #! format: on
+    return images
+end
+
+# need to change divisor to a overlap fraction, chech interaction with audioloader()
+# if divisor is 0, then no overlap atm
+function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 2) #5s sample, 2.5s hop
+    signal, freq = load_audio_file(file)
+    if freq > 16000
+        signal, freq = resample_to_16000hz(signal, freq)
+    end
+    f = convert(Int, freq)
+    inc = increment * f
+    #hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
+    hop = f * increment / divisor |> x -> x == Inf ? 0 : trunc(Int, x)
+    split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
+    raw_images = ThreadsX.map(x -> get_image_for_inference(x, f), split_signal)
+    n_samples = length(raw_images)
+    return raw_images, n_samples
+end
+
+function load_audio_file(file::String)
+    ext = split(file, ".")[end]
+    @assert ext in ["WAV", "wav", "flac"] "Unsupported audio file type, requires wav or flac."
+    if ext in ["WAV", "wav"]
+        signal, freq = WAV.wavread(file)
+    else
+        signal, freq = load(file)
+    end
+    @assert !isempty(signal[:, 1]) "$file seems to be empty, could it be corrupted?\nYou could delete it, or replace it with a known\ngood version from SD card or backup."
+    return signal, freq
+end
+
+function resample_to_16000hz(signal, freq)
+    signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
+    freq = 16000
+    return signal, freq
+end
 
 ############### PYTHON Opensoundscape ################
 #=

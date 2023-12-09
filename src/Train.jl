@@ -1,11 +1,11 @@
 # Train.jl
 
+export train #beware Flux.train! is not Skraak.train
+
 import Base: length, getindex
 using CUDA, DataFrames, Dates, Images, Flux, FreqTables, Glob, JLD2, Noise
 using Random: shuffle!, seed!
 using Metalhead: ResNet
-
-export train #beware Flux.train! is not Skraak.train
 
 #=
 function train(
