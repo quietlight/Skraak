@@ -2,8 +2,8 @@
 
 export make_clips, move_clips_to_folders
 
-using CSV, DataFrames, Dates, DSP, Glob, JSON, Random, TimeZones, WAV, PNGFiles, Images
-using DataFramesMeta: @transform!, @subset!, @byrow, @passmissing
+using CSV, DataFrames, Dates, DSP, Glob, JSON, PerceptualColourMaps, Random, TimeZones, WAV, PNGFiles, Images
+using DataFramesMeta #: @transform!, @subset!, @byrow, @passmissing
 
 """
 make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
@@ -13,7 +13,7 @@ file names, wav's, spectrograms etc to be reviewed.
 it calls night() and may call construct_dawn_dusk_dict() unless the dict is globally defined and passed in
 
 It should be run from Pomona-1/, Pomona-2/ or Pomona-3/, assumes it is, it uses the path
-It saves  wav and png files to /home/david/Upload/
+It saves  wav and png files to current working directory, ie Pomona-3
 need to use a try/catch because the 2 assert functions thow an error to short circuit the function
 
 using Glob, Skraak
@@ -190,6 +190,7 @@ function calculate_clip_start_end(
     return st, en
 end
 
+
 # f neeeds to be an Int
 function get_image_from_sample(sample, f) #sample::Vector{Float64}
     S = DSP.spectrogram(sample, 400, 2; fs = convert(Int, f))
@@ -204,6 +205,7 @@ function get_image_from_sample(sample, f) #sample::Vector{Float64}
         x -> x .+ abs(minimum(x)) |>
         x -> x ./ maximum(x) |>
         x -> reverse(x, dims = 1) |>
+        x -> applycolourmap(x, cmap("L4")) |>
         x -> RGB.(x) |> 
         x -> imresize(x, 224, 224)
         #! format: on
@@ -287,3 +289,30 @@ function move_clips_to_folders(df::DataFrame)
         end
     end
 end
+
+#=
+For making colour images, not wired up into skraak yet.
+Using for 24/7 and 250kHZ data.
+
+
+using DSP, GLMakie, PNGFiles
+function get_colour_image_from_sample(sample, f)
+    dims = 224 #px
+    S = DSP.spectrogram(sample[:, 1], 400, 2; fs = f)
+    f = GLMakie.Figure(resolution = (dims, dims), figure_padding = 0)
+    ax = GLMakie.Axis(f[1, 1], spinewidth = 0)
+    GLMakie.hidedecorations!(ax)
+    GLMakie.heatmap!(ax, (DSP.pow2db.(S.power))', colormap = :inferno)
+
+    @assert size(f) == (dims, dims) "Wrong size"
+    return f
+end
+
+function save_colour_image(f, outfile)
+    try
+        PNGFiles.save("$outfile.png", f)
+    catch err
+        @info "Saving $outfile.png failed\n$err"
+    end
+end
+=#

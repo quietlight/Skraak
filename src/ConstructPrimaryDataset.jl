@@ -1,8 +1,12 @@
 
-### WORK IN PROGRESS ###
-
 using DataFrames, CSV, Glob
 using DataFramesMeta: @transform!, @byrow #, @subset!, @passmissing 
+
+function make_dataset(input_file::String, output_path::String="/media/david/SSD2/PrimaryDataset/kiwi_set/")
+    @info "This could take some time.\nFirst we move audio files.\nThen we make the spectrogram images."
+    move_files(input_file, output_path) |> 
+    save_pngs()
+end
 
 """
 Only moves WAVs not already there in dataset
@@ -14,9 +18,9 @@ will find file in folder structure location/trip_date/file
 constructs dataset at output_path
 assumes file name has one . for extension only
 """
-function move_files_to_dataset(
+function move_files(
     input_file::String,
-    output_path::String = "/media/david/SSD2/PrimaryDataset/kiwi_set/",
+    output_path::String
 )
     df = DataFrame(CSV.File(input_file))
     @assert nrow(df) > 0 "Empty csv therefore dataframe"
@@ -29,6 +33,7 @@ function move_files_to_dataset(
     end
     select!(df, :location, :file, :start_time, :end_time)
     @transform!(df, @byrow :key = :location * "-" * :file)
+    @info "Moving files..."
     k = levels(df.key) #Vector{String}:
     for item in k
         fldr = split(item, ".")[end-1]
@@ -50,6 +55,7 @@ function save_pngs(df::DataFrame)
     @info "$(length(levels(df.key))) files"
     @info "$(length(df.key)) labels"
     select!(df, :key, :start_time, :end_time)
+    @info "Making spectrogram images..."
     gdf = groupby(df, :key)
     for f in gdf
         file = first(f.key) |> x -> replace(x, ".wav" => ".flac", ".WAV" => ".flac")

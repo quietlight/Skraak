@@ -30,12 +30,13 @@ Dont forget temp environment: ] activate --temp
 Use like:
 using Skraak
 glob_pattern = "*/*/"
-model = "/media/david/SSD1/model_K1-4_CPU_epoch-10-0.984-2023-11-20.jld2"
+model = "/media/david/SSD2/PrimaryDataset/model_K1-7_CPU_epoch-17-0.9126-2024-02-04.jld2"
+model = "/media/david/SSD2/PrimaryDataset/model_K1-7_R50_CPU_epoch-20-0.9136-2024-02-07.jld2"
 predict(glob_pattern, model)
 """
 
 function predict(glob_pattern::String, model::String)
-    model = load_model(model) |> device
+    model = load_model_pred(model) |> device
     folders = glob(glob_pattern)
     @info "Folders: $folders"
     for folder in folders
@@ -45,7 +46,7 @@ function predict(glob_pattern::String, model::String)
 end
 
 function predict(folders::Vector{String}, model::String)
-    model = load_model(model) |> device
+    model = load_model_pred(model) |> device
     @info "Folders: $folders"
     for folder in folders
         @info "Working on: $folder"
@@ -55,11 +56,11 @@ end
 
 #~~~~~ The guts ~~~~~#
 # see load_model() from train, different input types
-function load_model(model_path::String)
+function load_model_pred(model_path::String)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])
-    f = Metalhead.ResNet(18, pretrain = false).layers
-    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
+    f = Metalhead.ResNet(50, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => model_classes))
     model = Flux.Chain(f[1], l)
     Flux.loadmodel!(model, model_state)
     return model
@@ -104,16 +105,6 @@ function getindex(data::PredictImageContainer{Vector{String}}, idx::Int)
         x -> permutedims(x, (3, 2, 1))
         #! format: on
     return img, path
-end
-
-function get_image_for_inference(sample, f)
-    image =
-        #! format: off
-        get_image_from_sample(sample, f) |>
-        x -> collect(channelview(float32.(x))) |> 
-        x -> permutedims(x, (3, 2, 1))
-        #! format: on
-    return image
 end
 
 function predict_image_folder(png_files::Vector{String}, model, folder::String)
@@ -196,6 +187,7 @@ function audio_loader(file::String, increment::Int = 5, divisor::Int = 2)
     raw_images, n_samples = get_images_from_audio(file::String, increment, divisor)
     images = reshape_images(raw_images, n_samples)
 
+    # Start time and end time for each 5s audio clip, in seconds relative to the start of the file.
     start_time = 0:(increment/divisor):(n_samples-1)*(increment/divisor)
     end_time = increment:(increment/divisor):(n_samples+1)*(increment/divisor)
     time = collect(zip(start_time, end_time))
@@ -212,6 +204,16 @@ function reshape_images(raw_images, n_samples)
         x -> reshape(x, (224, 224, 3, n_samples))
         #! format: on
     return images
+end
+
+function get_image_for_inference(sample, f)
+    image =
+        #! format: off
+        get_image_from_sample(sample, f) |>
+        x -> collect(channelview(float32.(x))) |> 
+        x -> permutedims(x, (3, 2, 1))
+        #! format: on
+    return image
 end
 
 # need to change divisor to a overlap fraction, chech interaction with audioloader()
@@ -276,15 +278,15 @@ for folder in folders:
     os.chdir(folder)
     print(folder, ' start: ', datetime.now())
     # Beware, secretary island files are .wav
-    field_recordings = glob('./*.WAV')
+    field_recordings = glob('./*.[W,w][A,a][V,v]')
     scores, preds, unsafe = model.predict(
             field_recordings,
             binary_preds = 'single_target',
             overlap_fraction = 0.5,
             batch_size =  128,
             num_workers = 12)
-    scores.to_csv("scores-2023-11-13.csv")
-    preds.to_csv("preds-2023-11-13.csv")
+    scores.to_csv("scores-2023-12-27.csv")
+    preds.to_csv("preds-2023-12-27.csv")
     os.chdir('../..')
     print(folder, ' done: ', datetime.now())
     print()

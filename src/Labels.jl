@@ -63,8 +63,8 @@ audiodata_db(df, "pomona_labels_20230418") NOT_WORKING maybe titles
 to use cli, need to remove header row
 
 duckdb /media/david/SSD1/AudioData.duckdb
-COPY pomona_labels_20230418 FROM 'DB_Labels/pomona_labels_2023-11-02.csv';
-COPY pomona_files FROM 'DB_Files/pomona_files_20231102.csv';
+COPY pomona_labels_20230418 FROM 'DB_Labels/pomona_labels_2023-12-28.csv';
+COPY pomona_files FROM 'DB_Files/pomona_files_20231228.csv';
 
 Then backup with:
 EXPORT DATABASE 'AudioDataBackup_2023-11-14';

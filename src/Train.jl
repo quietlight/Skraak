@@ -24,12 +24,16 @@ Saves jld2's in current directory
 
 Use like:
 using Skraak
-glob_pattern = "*/*/[N,K]/*.png" #from SSD2/PrimaryDataset 7758648
-train("K1-5", 2, glob_pattern, true, 0.95, 64)
-glob_pattern = "Clips_2023-09-11/[D,F,M,N]/*.png" #from SSD2/Clips
-train("Test", 2, glob_pattern, false)
-train("Test2", 2, glob_pattern, "/media/david/SSD1/model_K1-3_CPU_epoch-10-0.9965-2023-10-18T17:32:36.747.jld2")
-train("Test3", 2, glob_pattern, "/Volumes/SSD1/model_DFMN1-1_CPU_epoch-11-0.9126-2023-10-20T08:42:32.533.jld2")
+glob_pattern = "kiwi_set_*/*/[K]/*.png" #from SSD2/PrimaryDataset 7758648 hard coded a random selection of not, 1:1
+train("K1-7_R50", 20, glob_pattern, true, 0.90, 32)
+
+glob_pattern = "kiwi_set_2023-11-13/*/[N,K]/*.png" #from SSD2/PrimaryDataset 
+model = "/media/david/SSD2/PrimaryDataset/media/david/SSD2/PrimaryDataset/model_K1-6_CPU_epoch-3-0.9798-2024-02-01.jld2"
+train("K1-6_ft1", 10, glob_pattern, model, 0.95, 64)
+
+glob_pattern = "*/[D,F,M,N]/*.png" #from SSD2/Clips
+model = "/media/david/SSD2/PrimaryDataset/model_K1-5_CPU_epoch-6-0.9795-2023-12-16.jld2"
+train("DFMN1-5", 20, glob_pattern, model)
 =#
 const LABELTOINDEX::Dict{String,Int32} = Dict()
 
@@ -44,7 +48,10 @@ function train(
     batch_size::Int64 = 64,
 )
     epochs = 1:train_epochs
-    images = glob(glob_pattern) |> shuffle! |> x -> x[1:1000]
+    images1 = glob(glob_pattern) #|> shuffle! #|> x -> x[1:1000]
+
+    images2 = glob("kiwi_set_*/*/N/*.png") |> shuffle! |> x -> x[1:(length(images1))]
+    images = vcat(images1, images2) |> shuffle!
     @assert !isempty(images) "No png images found"
     @info "$(length(images)) images in dataset"
 
@@ -223,8 +230,8 @@ end
 
 # see load_model() from predict, and below
 function load_model(pretrain::Bool, classes::Int64)
-    fst = Metalhead.ResNet(18, pretrain = pretrain).layers
-    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
+    fst = Metalhead.ResNet(50, pretrain = pretrain).layers
+    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => classes))
     model = Flux.Chain(fst[1], lst) |> device
     return model
 end
@@ -235,15 +242,15 @@ end
 function load_model(model_path::String, classes::Int64)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])
-    f = Metalhead.ResNet(18, pretrain = false).layers
-    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
+    f = Metalhead.ResNet(50, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => model_classes))
     m = Flux.Chain(f[1], l)
     Flux.loadmodel!(m, model_state)
     if classes == model_classes
         model = m |> device
     else
         fst = m.layers
-        lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
+        lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => classes))
         model = Flux.Chain(fst[1], lst) |> device
     end
     return model
@@ -281,7 +288,7 @@ function dict_to_text_file(dict, model_name)
     open("labels_$(model_name)-$(today()).txt", "w") do file
         write(file, text)
     end
-    @info "Saved label to index mapping for future reference"
+    @info "Saved labels to file for future reference"
 end
 
 function training_loop!(
