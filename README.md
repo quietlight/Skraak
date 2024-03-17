@@ -46,7 +46,7 @@ When finished working you can if you like do 'free Skraak' in Pkg mode (accessed
     * file(String),start_time,end_time,label(Integer) (where start_time and end_time are in seconds from the start of the wav file)
     * at least 2 label classes are required, for example Kiwi, Not
 3. Generate a primary dataset of spectrogram images with the following file structure:
-    * DATASET/AUDIO_FILE*/LABEL*/PNG's (png files must be 224X224 px square, Grayscale or RGB). 
+    * DATASET/AUDIO_FILE*/LABEL*/PNG's (png files must be 224X224 px square RGB). 
     * This structure is required, when training, __the parent folder of a file is the label__.
     * This function creates a folder for each file, creates subfolders for each label, then saves png files in the appropriate label sub folder.
     * Space is needed. It uses the whole audio file. (I aim for 96% Not, 4% Kiwi)
