@@ -1,11 +1,12 @@
 
+#unfinished
 using DataFrames, CSV, Glob
 using DataFramesMeta: @transform!, @byrow #, @subset!, @passmissing 
 
 function make_dataset(input_file::String, output_path::String="/media/david/SSD2/PrimaryDataset/kiwi_set/")
     @info "This could take some time.\nFirst we move audio files.\nThen we make the spectrogram images."
     move_files(input_file, output_path) |> 
-    save_pngs()
+    x -> save_pngs(x, output_path)
 end
 
 """
@@ -44,34 +45,39 @@ function move_files(
             b = glob("$l/*/$f")
             @assert length(b) == 1
             mkpath("$fldr")
-            signal, freq = Skraak.load_audio_file(b)
+            signal, freq = Skraak.load_audio_file(first(b))
             save("$output_path$(fldr)/$outf", signal, freq)
         end
     end
     return df
 end
 
-function save_pngs(df::DataFrame)
+# work needed to make it save in correct place, currently saves relativ to pwd, this is incorrect relative to the previous function
+function save_pngs(df::DataFrame,
+    output_path::String)
     @info "$(length(levels(df.key))) files"
     @info "$(length(df.key)) labels"
     select!(df, :key, :start_time, :end_time)
     @info "Making spectrogram images..."
     gdf = groupby(df, :key)
-    for f in gdf
+    for f in gdf #where f = the file
         file = first(f.key) |> x -> replace(x, ".wav" => ".flac", ".WAV" => ".flac")
         folder = split(file, ".")[1]
 
-        kiwi = f.kiwi
+        #signal, freq = wavread("kiwi_set_2023-11-13/$folder/$file")
+        signal, freq = Skraak.load_audio_file("$output_path$folder/$file")
+        length_signal = length(signal)
+        duration = length_signal ÷ freq 
+
+        mkpath("$output_path$folder/K")
+        mkpath("$output_path$folder/N")
+
+        ldf = DataFrame(second = 1:duration, kiwi = false)
+
+        #get a list of start and end times for each clip, clumsy, need to fix this bit
+        kiwi = collect(map(collect, zip(f.start_time, f.end_time)))
         @info (folder, duration, kiwi)
 
-        #signal, freq = wavread("kiwi_set_2023-11-13/$folder/$file")
-        signal, freq = Skraak.load_audio_file("kiwi_set_2023-11-13/$folder/$file")
-        length_signal = length(signal)
-        duration = length_signal / freq
-
-        mkpath("kiwi_set_2023-11-13/$folder/K")
-        mkpath("kiwi_set_2023-11-13/$folder/N")
-        ldf = DataFrame(second = 1:duration, kiwi = false)
         for clip in kiwi
             clip[1] > 0 ? st = clip[1] : st = 1
             clip[2] <= duration ? nd = clip[2] : nd = duration
@@ -86,35 +92,38 @@ function save_pngs(df::DataFrame)
             plot = get_image_from_sample(sample, freq)
             if true in levels(wdf.kiwi)
                 #save to K folder
-                #savefig(plot, "kiwi_set-2023-09-07/$folder/K/$folder-$start-$(start+4).png")
                 PNGFiles.save(
-                    "kiwi_set_2023-11-13/$folder/K/$folder-$start-$(start+4).png",
+                    "$output_path$folder/K/$folder-$start-$(start+4).png",
                     plot,
                 )
                 start += 2
             else
                 #save to N folder
-                #savefig(plot, "kiwi_set-2023-09-07/$folder/N/$folder-$start-$(start+4).png")
                 PNGFiles.save(
-                    "kiwi_set_2023-11-13/$folder/N/$folder-$start-$(start+4).png",
+                    "$output_path$folder/N/$folder-$start-$(start+4).png",
                     plot,
                 )
                 start += 5
             end
         end
         if start + 4 > duration
-            wdf = df[duration-4:duration, :]
+            wdf = ldf[duration-4:duration, :]
             #make image
             st, en = calculate_clip(duration - 4, duration, freq, length_signal)
             sample = signal[Int(st):Int(en)]
             plot = get_image_from_sample(sample, freq)
             #save to correct folder
             true in levels(wdf.kiwi) ? l = "K" : l = "N"
-            #savefig(plot, "kiwi_set-2023-09-07/$folder/$l/$folder-$(duration-4)-$duration.png")
             PNGFiles.save(
-                "kiwi_set_2023-11-13/$folder/$l/$folder-$(duration-4)-$duration.png",
+                "$output_path$folder/$l/$folder-$(duration-4)-$duration.png",
                 plot,
             )
         end
     end
+end
+
+function calculate_clip(st::Int, en::Int, freq::Int32, len::Int)
+	s=(st*freq)-freq+1
+	en*freq <= len ? e=en*freq : e=len
+	return s, e
 end

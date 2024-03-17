@@ -30,8 +30,7 @@ Dont forget temp environment: ] activate --temp
 Use like:
 using Skraak
 glob_pattern = "*/*/"
-model = "/media/david/SSD2/PrimaryDataset/model_K1-7_CPU_epoch-17-0.9126-2024-02-04.jld2"
-model = "/media/david/SSD2/PrimaryDataset/model_K1-7_R50_CPU_epoch-20-0.9136-2024-02-07.jld2"
+model = "/media/david/SSD2/PrimaryDataset/model_K1-9_original_set_CPU_epoch-7-0.9924-2024-03-05.jld2"
 predict(glob_pattern, model)
 """
 
@@ -59,8 +58,9 @@ end
 function load_model_pred(model_path::String)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])
-    f = Metalhead.ResNet(50, pretrain = false).layers
-    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => model_classes))
+    @info "Model classes: $model_classes"
+    f = Metalhead.ResNet(18, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
     model = Flux.Chain(f[1], l)
     Flux.loadmodel!(model, model_state)
     return model
@@ -79,7 +79,7 @@ function predict_folder(folder::String, model)
     png_files = glob("$folder/*.png")
     #it will predict on images when both images and audio present
     if isempty(png_files)
-        predict_audio_folder(audio_files, model, folder)
+        length(audio_files) > 0 ? predict_audio_folder(audio_files, model, folder) : @info "No png, flac, wav, WAV files present in $folder"
     else
         predict_image_folder(png_files, model, folder)
     end
@@ -206,15 +206,17 @@ function reshape_images(raw_images, n_samples)
     return images
 end
 
+#= not needed
 function get_image_for_inference(sample, f)
     image =
         #! format: off
         get_image_from_sample(sample, f) |>
-        x -> collect(channelview(float32.(x))) |> 
+        # x -> collect(channelview(float32.(x))) |> 
         x -> permutedims(x, (3, 2, 1))
         #! format: on
     return image
 end
+=#
 
 # need to change divisor to a overlap fraction, chech interaction with audioloader()
 # if divisor is 0, then no overlap atm
@@ -228,7 +230,7 @@ function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 
     #hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
     hop = f * increment / divisor |> x -> x == Inf ? 0 : trunc(Int, x)
     split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
-    raw_images = ThreadsX.map(x -> get_image_for_inference(x, f), split_signal)
+    raw_images = ThreadsX.map(x -> get_image_from_sample(x, f), split_signal)
     n_samples = length(raw_images)
     return raw_images, n_samples
 end

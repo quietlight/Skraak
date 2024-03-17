@@ -3,7 +3,8 @@
 export train #beware Flux.train! is not Skraak.train
 
 import Base: length, getindex
-using CUDA, DataFrames, Dates, Images, Flux, FreqTables, Glob, JLD2, Noise
+import MLBase
+using CUDA, Dates, Images, Flux, Glob, JLD2, Noise
 using Random: shuffle!, seed!
 using Metalhead: ResNet
 
@@ -11,7 +12,7 @@ using Metalhead: ResNet
 function train(
     model_name::String,
     train_epochs::Int64,
-    glob_pattern::String="*/*.png",
+    images::Vector{String},
     pretrain::Model=true,
     train_test_split::Float64 = 0.8,
     batch_size::Int64 = 64,
@@ -23,17 +24,14 @@ Assumes 224x224 pixel RGB images as png's
 Saves jld2's in current directory
 
 Use like:
-using Skraak
-glob_pattern = "kiwi_set_*/*/[K]/*.png" #from SSD2/PrimaryDataset 7758648 hard coded a random selection of not, 1:1
-train("K1-7_R50", 20, glob_pattern, true, 0.90, 32)
+using Skraak, Glob
+images = glob("kiwi_set*/*/[N,K]/*.png") #11699814-element Vector{String}
+model = "/media/david/SSD2/PrimaryDataset/model_K1-9_original_set_CPU_epoch-7-0.9924-2024-03-05.jld2"
+train("K1-10_total_set_no_augumentation", 2, images, model, 0.97, 64)
 
-glob_pattern = "kiwi_set_2023-11-13/*/[N,K]/*.png" #from SSD2/PrimaryDataset 
-model = "/media/david/SSD2/PrimaryDataset/media/david/SSD2/PrimaryDataset/model_K1-6_CPU_epoch-3-0.9798-2024-02-01.jld2"
-train("K1-6_ft1", 10, glob_pattern, model, 0.95, 64)
-
-glob_pattern = "*/[D,F,M,N]/*.png" #from SSD2/Clips
+images = glob("*/[D,F,M,N]/*.png") #from SSD2/Clips
 model = "/media/david/SSD2/PrimaryDataset/model_K1-5_CPU_epoch-6-0.9795-2023-12-16.jld2"
-train("DFMN1-5", 20, glob_pattern, model)
+train("DFMN1-5", 20, images, model)
 =#
 const LABELTOINDEX::Dict{String,Int32} = Dict()
 
@@ -42,16 +40,13 @@ Model = Union{Bool,String}
 function train(
     model_name::String,
     train_epochs::Int64,
-    glob_pattern::String = "*/*.png",
+    images::Vector{String}, #glob_pattern::String = "*/*.png"
     pretrain::Model = true,
     train_test_split::Float64 = 0.8,
     batch_size::Int64 = 64,
 )
     epochs = 1:train_epochs
-    images1 = glob(glob_pattern) #|> shuffle! #|> x -> x[1:1000]
-
-    images2 = glob("kiwi_set_*/*/N/*.png") |> shuffle! |> x -> x[1:(length(images1))]
-    images = vcat(images1, images2) |> shuffle!
+    #images = glob(glob_pattern) #|> shuffle! |> x -> x[1:640]
     @assert !isempty(images) "No png images found"
     @info "$(length(images)) images in dataset"
 
@@ -84,7 +79,7 @@ function train(
         epochs,
         model_name,
         classes,
-        label_to_index,
+        label_to_index
     )
     @info "Finished $(last(epochs)) epochs: " now()
 end
@@ -230,8 +225,8 @@ end
 
 # see load_model() from predict, and below
 function load_model(pretrain::Bool, classes::Int64)
-    fst = Metalhead.ResNet(50, pretrain = pretrain).layers
-    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => classes))
+    fst = Metalhead.ResNet(18, pretrain = pretrain).layers
+    lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
     model = Flux.Chain(fst[1], lst) |> device
     return model
 end
@@ -242,25 +237,25 @@ end
 function load_model(model_path::String, classes::Int64)
     model_state = JLD2.load(model_path, "model_state")
     model_classes = length(model_state[1][2][1][3][2])
-    f = Metalhead.ResNet(50, pretrain = false).layers
-    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => model_classes))
+    f = Metalhead.ResNet(18, pretrain = false).layers
+    l = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => model_classes))
     m = Flux.Chain(f[1], l)
     Flux.loadmodel!(m, model_state)
     if classes == model_classes
         model = m |> device
     else
         fst = m.layers
-        lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(2048 => classes))
+        lst = Flux.Chain(AdaptiveMeanPool((1, 1)), Flux.flatten, Dense(512 => classes))
         model = Flux.Chain(fst[1], lst) |> device
     end
     return model
 end
 
-function evaluate(m, d)
+function evaluate(m, d, c)
     good = 0
     count = 0
-    pred = []
-    actual = []
+    pred = Int64[]
+    actual = Int64[]
     for (x, y) in d
         p = Flux.onecold(m(x))
         good += sum(p .== y)
@@ -270,8 +265,11 @@ function evaluate(m, d)
     end
     accuracy = round(good / count, digits = 4)
     confusion_matrix =
-        freqtable(DataFrame(targets = actual, predicts = pred), :targets, :predicts)
-    return accuracy, confusion_matrix
+        MLBase.confusmat(c, actual, pred)
+        #freqtable(DataFrame(targets = actual, predicts = pred), :targets, :predicts)
+    #roc=MLBase.roc(actual, pred, 100)
+    #f1=MLBase.f1score(roc)
+    return accuracy, confusion_matrix #, roc, f1
 end
 
 function train_epoch!(model; opt, train, classes)
@@ -302,34 +300,35 @@ function training_loop!(
     classes,
     label_to_index,
 )
-    @time eval, vcm = evaluate(model, test)
-    @info "warm up" accuracy = eval
-    @info "warm up" vcm
+    @time eval, vcm = evaluate(model, test, classes)
+    @info "warm up accuracy" accuracy = eval
+    @info "warm up confusion matrix" vcm
 
-    a = 0.0
+    a = 0
     for epoch in epochs
         println("")
         @info "Starting Epoch: $epoch"
         epoch == 1 && dict_to_text_file(label_to_index, model_name)
         @time train_epoch!(model; opt, train, classes)
-        @time metric_train, train_confusion_matrix = evaluate(model, train_sample)
+        @time train_accuracy, train_confusion_matrix = evaluate(model, train_sample, classes)
         @info "Epoch: $epoch"
-        @info "train" accuracy = metric_train
+        @info "train" accuracy = train_accuracy
         @info "train" train_confusion_matrix
 
-        @time metric_test, test_confusion_matrix = evaluate(model, test)
-        @info "test" accuracy = metric_test
+        @time test_accuracy, test_confusion_matrix = evaluate(model, test, classes)
+        @info "test" accuracy = test_accuracy
         @info "test" test_confusion_matrix
 
-        metric_test > a && begin
-            a = metric_test
+        # number kiwi guessed right, assumes kiwi=1, not=2 (alphabetical)
+        #test_confusion_matrix[1,1] > a && begin
+            #a = test_confusion_matrix[1,1]
             let _model = cpu(model)
                 jldsave(
-                    "model_$(model_name)_CPU_epoch-$epoch-$metric_test-$(today()).jld2";
+                    "model_$(model_name)_CPU_epoch-$epoch-$test_accuracy-$(today()).jld2";
                     model_state = Flux.state(_model),
                 )
                 @info "Saved a best_model"
             end
-        end
+        #end
     end
 end

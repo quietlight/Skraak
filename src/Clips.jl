@@ -2,7 +2,18 @@
 
 export make_clips, move_clips_to_folders
 
-using CSV, DataFrames, Dates, DSP, Glob, JSON, PerceptualColourMaps, Random, TimeZones, WAV, PNGFiles, Images
+using CSV,
+    DataFrames,
+    Dates,
+    DSP,
+    Glob,
+    JSON,
+    PerceptualColourMaps,
+    Random,
+    TimeZones,
+    WAV,
+    PNGFiles,
+    Images
 using DataFramesMeta #: @transform!, @subset!, @byrow, @passmissing
 
 """
@@ -63,13 +74,17 @@ function make_clips(
     # Make clip and spectrogram
     for (k, v) in pairs(gdf)
         #file_name = chop(v.file[1], head = 2, tail = 4)
-        file_name = path_to_file_string(v.file[1])
+        file_name, extension = path_to_file_string(v.file[1])
         start_times = v[!, :start_time] |> sort
 
         detections = cluster_detections(start_times)
         isempty(detections) && continue
 
-        signal, freq = wavread("$location/$trip_date/$file_name.WAV")
+        signal, freq = wavread("$location/$trip_date/$(file_name).$(extension)")
+        if freq > 16000
+            signal, freq = Skraak.resample_to_16000hz(signal, freq)
+        end
+        freq = freq |> Float32
         length_signal = length(signal)
 
         for detection in detections
@@ -86,6 +101,7 @@ function make_clips(
             #savefig(plot, "$outfile.png")
             image = get_image_from_sample(sample, freq)
             PNGFiles.save("$outfile.png", image)
+            PNGFiles.save("/media/david/SSD1/$outfile.png", image)
         end
         print(".")
     end
@@ -124,14 +140,14 @@ function filter_positives!(df::DataFrame, label)::DataFrame
 end
 
 function path_to_file_string(path) #becareful path::String won't work: no method matching path_to_file_string(::InlineStrings.String31) line 70
-    f = split(path, "/")[end] |> x -> split(x, ".") |> first
+    f = split(path, "/")[end] |> x -> split(x, ".")
     #f = chop(file, head = 2, tail = 4)
-    return f
+    return first(f), last(f)
 end
 
 function filename_to_datetime!(file)::DateTime
     #file_string = chop(file, head = 2, tail = 4)
-    file_string = path_to_file_string(file)
+    file_string = path_to_file_string(file) |> first
     date_time =
         length(file_string) > 13 ? DateTime(file_string, dateformat"yyyymmdd_HHMMSS") :
         DateTime(
@@ -190,7 +206,6 @@ function calculate_clip_start_end(
     return st, en
 end
 
-
 # f neeeds to be an Int
 function get_image_from_sample(sample, f) #sample::Vector{Float64}
     S = DSP.spectrogram(sample, 400, 2; fs = convert(Int, f))
@@ -206,8 +221,9 @@ function get_image_from_sample(sample, f) #sample::Vector{Float64}
         x -> x ./ maximum(x) |>
         x -> reverse(x, dims = 1) |>
         x -> applycolourmap(x, cmap("L4")) |>
-        x -> RGB.(x) |> 
-        x -> imresize(x, 224, 224)
+        #x -> RGB.(x) |> 
+        x -> imresize(x, 224, 224) |>
+        x -> Float32.(x)
         #! format: on
     return image
 end
@@ -260,6 +276,7 @@ end
 """
 move_clips_to_folders(df::DataFrame)
 
+df=
 Takes a 2 column dataframe: file, label
 file must be list of png images, assumes wav's are there too
 will move mp4's from video folder if they are present
@@ -276,7 +293,8 @@ function move_clips_to_folders(df::DataFrame)
         mkpath("$(row.label)/")
         try
             mv(src, dst)
-            mv(chop(src, tail = 3) * "wav", chop(dst, tail = 3) * "wav")
+            isfile(chop(src, tail = 3) * "wav") &&
+                mv(chop(src, tail = 3) * "wav", chop(dst, tail = 3) * "wav")
             if isdir(video)
                 mkpath("video/$(row.label)/")
                 mv(
@@ -293,7 +311,6 @@ end
 #=
 For making colour images, not wired up into skraak yet.
 Using for 24/7 and 250kHZ data.
-
 
 using DSP, GLMakie, PNGFiles
 function get_colour_image_from_sample(sample, f)
