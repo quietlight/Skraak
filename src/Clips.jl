@@ -2,6 +2,7 @@
 
 export make_clips, move_clips_to_folders
 
+>>>>>>> 1 [AQWXGGE3 mod to clips.jl]
 using CSV,
     DataFrames,
     Dates,
@@ -14,6 +15,20 @@ using CSV,
     WAV,
     PNGFiles,
     Images
+======= 1 [MMG2PLXK new functiion to make clips of downloaded bisd calls]
+using CSV,
+    DataFrames,
+    Dates,
+    DSP,
+    Glob,
+    JSON,
+    PerceptualColourMaps,
+    Random,
+    TimeZones,
+    WAV,
+    PNGFiles,
+    Images
+<<<<<<< 1
 using DataFramesMeta #: @transform!, @subset!, @byrow, @passmissing
 
 """
@@ -58,6 +73,7 @@ function make_clips(
 )
     # Assumes function run from Pomona-1 or Pomona-2
     location, trip_date, _ = split(preds_path, "/")
+    ##location, h, trip_date, _ = split(preds_path, "/")
 
     # Load and group data frame by file
     gdf =
@@ -81,6 +97,7 @@ function make_clips(
         isempty(detections) && continue
 
         signal, freq = wavread("$location/$trip_date/$(file_name).$(extension)")
+        ##signal, freq = wavread("$location/$h/$trip_date/$(file_name).$(extension)")
         if freq > 16000
             signal, freq = Skraak.resample_to_16000hz(signal, freq)
         end
@@ -90,6 +107,7 @@ function make_clips(
         for detection in detections
             st, en = calculate_clip_start_end(detection, freq, length_signal)
             name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
+            ##name = "$location-$h-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
             f = "Clips_$(today())"
             mkpath(f)
             outfile = "$f/$name"
@@ -101,7 +119,7 @@ function make_clips(
             #savefig(plot, "$outfile.png")
             image = get_image_from_sample(sample, freq)
             PNGFiles.save("$outfile.png", image)
-            PNGFiles.save("/media/david/SSD1/$outfile.png", image)
+            #PNGFiles.save("/media/david/SSD1/$outfile.png", image)
         end
         print(".")
     end
@@ -308,8 +326,30 @@ function move_clips_to_folders(df::DataFrame)
     end
 end
 
+# Convert mp3's with: for file in *.mp3; do ffmpeg -i "${file}" -ar 16000 "${file%.*}.wav"; done
+# Requires 16000hz wav's, works in current folder, need ffmpeg to convert mp3's to wavs at 16000hz
+#= 
+wavs = glob("*.wav")
+for wav in wavs
+    Skraak.make_spectro_from_file(wav)
+end
+=#
+function make_spectro_from_file(file::String)
+    signal, freq = wavread("$file")
+    freq = freq |> Float32
+    partitioned_signal = Iterators.partition(signal, 80000) #5s clips
+
+    for (index, part) in enumerate(partitioned_signal)
+        length(part) > 50000 && begin
+            outfile = "$(chop(file, head=0, tail=4))__$(index)"
+            image = get_image_from_sample(part, freq)
+            PNGFiles.save("$outfile.png", image)
+        end
+    end
+end
+
 #=
-For making colour images, not wired up into skraak yet.
+For making colour images using GLMakie (moved on but may be useful one day), not wired up into skraak yet.
 Using for 24/7 and 250kHZ data.
 
 using DSP, GLMakie, PNGFiles

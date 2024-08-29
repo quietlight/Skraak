@@ -1,6 +1,7 @@
 # Predict.jl
 
 export predict
+export get_images_from_audio
 
 using WAV,
     DSP, Images, ThreadsX, Dates, DataFrames, CSV, Flux, CUDA, Metalhead, JLD2, FLAC, Glob
@@ -31,6 +32,8 @@ Use like:
 using Skraak
 glob_pattern = "*/*/"
 model = "/media/david/SSD2/PrimaryDataset/model_K1-9_original_set_CPU_epoch-7-0.9924-2024-03-05.jld2"
+glob_pattern = "Clips_2024-06-26/"
+model = "/media/david/SSD1/Clips/model_DFMN1-5_CPU_epoch-18-0.9132-2024-01-29.jld2"
 predict(glob_pattern, model)
 """
 
@@ -79,7 +82,8 @@ function predict_folder(folder::String, model)
     png_files = glob("$folder/*.png")
     #it will predict on images when both images and audio present
     if isempty(png_files)
-        length(audio_files) > 0 ? predict_audio_folder(audio_files, model, folder) : @info "No png, flac, wav, WAV files present in $folder"
+        length(audio_files) > 0 ? predict_audio_folder(audio_files, model, folder) :
+        @info "No png, flac, wav, WAV files present in $folder"
     else
         predict_image_folder(png_files, model, folder)
     end
@@ -211,7 +215,7 @@ function get_image_for_inference(sample, f)
     image =
         #! format: off
         get_image_from_sample(sample, f) |>
-        # x -> collect(channelview(float32.(x))) |> 
+        # x -> collect(channelview(float32.(x))) |>
         x -> permutedims(x, (3, 2, 1))
         #! format: on
     return image
@@ -228,7 +232,7 @@ function get_images_from_audio(file::String, increment::Int = 5, divisor::Int = 
     f = convert(Int, freq)
     inc = increment * f
     #hop = f * increment ÷ divisor #need guarunteed Int, maybe not anymore, refactor
-    hop = f * increment / divisor |> x -> x == Inf ? 0 : trunc(Int, x)
+    hop = 0 #f * increment / divisor |> x -> x == Inf ? 0 : trunc(Int, x)
     split_signal = DSP.arraysplit(signal[:, 1], inc, hop)
     raw_images = ThreadsX.map(x -> get_image_from_sample(x, f), split_signal)
     n_samples = length(raw_images)
@@ -255,6 +259,7 @@ end
 
 ############### PYTHON Opensoundscape ################
 #=
+# Python 3.8.12, opensoundscape 0.7.1
 # Dont forget conda activate opensoundscape
 # Dont forget to modify file names and glob pattern
 # Run script in Pomona-2, hard code trip date in the glob
@@ -275,6 +280,7 @@ from datetime import datetime
 model = load_model('/home/david/best.model')
 
 # folders =  glob('./*/2023-?????/')
+# folders = glob('./*/*/2024-05-0?')
 folders =  glob('./*/*/')
 for folder in folders:
     os.chdir(folder)
@@ -287,9 +293,9 @@ for folder in folders:
             overlap_fraction = 0.5,
             batch_size =  128,
             num_workers = 12)
-    scores.to_csv("scores-2023-12-27.csv")
-    preds.to_csv("preds-2023-12-27.csv")
-    os.chdir('../..')
+    scores.to_csv("scores-2024-08-29.csv")
+    preds.to_csv("preds-2024-08-29.csv")
+    os.chdir('../..') # Be careful this matches the glob on line 284
     print(folder, ' done: ', datetime.now())
     print()
     print()

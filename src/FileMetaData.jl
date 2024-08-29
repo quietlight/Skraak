@@ -8,17 +8,19 @@ using DataFrames, Dates, Glob, Random, SHA, TimeZones, WAV, XMLDict
 #=
 used like:
 using Glob, Skraak, CSV
-folders=glob("*/2023-11-02/")
-for folder in folders
+folders=glob("*/2024-06-23/")
+for folder in folders[2:end]
 cd(folder)
     try
         df = Skraak.file_metadata_to_df()
-        CSV.write("/media/david/SSD3/Pomona-4/pomona_files_20231228.csv", df; append=true)
+        CSV.write("/media/david/SSD3/New/pomona_files_20240627.csv", df; append=true)
     catch
         @warn "error with $folder"
     end
-cd("/media/david/SSD3/Pomona-4/")
+cd("/media/david/SSD3/New/")
 end
+
+Then go into sublime and change drive New to Pomona-4
 
 Then using duckdb cli from SSD:
 duckdb AudioData.duckdb
