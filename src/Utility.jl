@@ -1,9 +1,25 @@
 # Utility.jl
 
-export check_png_wav_both_present,
-    resize_image!, twilight_tuple_local_time, move_one_hour!, utc_to_nzdt!
+export dawn_dusk_of_sunrise_sunset,
+    get_sunrise_sunset_utc,
+    make_spectro_from_file,
+    move_one_hour!,
+    resample_to_16000hz,
+    resample_to_8000hz,
+    resize_image!,
+    utc_to_nzdt!,
+    check_png_wav_both_present
 
-using CSV, DataFrames, Dates, Glob, HTTP, Images, JSON, TimeZones, WAV
+using CSV,
+    DataFrames,
+    Dates,
+    Glob,
+    HTTP,
+    ImageTransformations,
+    JSON3,
+    TimeZones,
+    WAV,
+    DataFramesMeta
 #XMLDict, DBInterface, DSP, DuckDB, PNGFiles, Random, SHA
 
 """
@@ -26,12 +42,12 @@ function check_png_wav_both_present(folders::Vector{String})
     for folder in folders
         println(folder)
         println("Missing wav:")
-        p = glob("$folder/*.png")
+        p = Glob.glob("$folder/*.png")
         for png in p
             !isfile(chop(png, tail = 3) * "wav") && println(png)
         end
         println("Missing png:")
-        w = glob("$folder/*.[W,w][A,a][V,v]")
+        w = Glob.glob("$folder/*.[W,w][A,a][V,v]")
         for wav in w
             !isfile(chop(wav, tail = 3) * "png") && println(wav)
         end
@@ -61,7 +77,7 @@ same path.
 
 Use it like this:
 using Images, Glob
-a=glob("*/*.png")
+a=Glob.glob("*/*.png")
 for file in a
 resize_image!(file)
 end
@@ -69,52 +85,36 @@ end
 works really fast
 """
 function resize_image!(name::String, x::Int64 = 224, y::Int64 = 224)
-    small_image = imresize(load(name), (x, y))
+    small_image = ImageTransformations.imresize(load(name), (x, y))
     save(name, small_image)
 end
 
-"""
-twilight_tuple_local_time(dt::Date)
-
-Takes a date and returns a tuple with local time twilight times. Use to make a Dataframe then csv.
-Queries api.sunrise-sunset.org
-
-was using civil_twilight_end, civil_twilight_begin, changed to sunrise, sunset
-
-Use like this:
-Using CSV, Dates, DataFrames, Skraak
-df = DataFrame(Date=[], Dawn=[], Dusk=[])
-dr = Dates.Date(2019,01,01):Dates.Day(1):Dates.Date(2024,12,31)
-for day in dr
-    q = Utility.twilight_tuple_local_time(day)
-    isempty(q) ? println("fail $day") : push!(df, q)
-    sleep(5)
-end
-CSV.write("dawn_dusk.csv", df)
-
-using CSV, DataFrames, Dates, HTTP, JSON, TimeZones
-"""
-function twilight_tuple_local_time(dt::Date)
-    # C05 co-ordinates hard coded into function
-    resp1 = HTTP.get(
-        "https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$dt&formatted=0",
+#dawn_dusk is local time, sunrise_sunret is utc
+function dawn_dusk_of_sunrise_sunset(file::String)
+    df = DataFrames.DataFrame(CSV.File(file))
+    @transform!(
+        df,
+        @byrow :Dawn = (
+            ZonedDateTime((:sunrise |> String), "yyyy-mm-ddTHH:MM:SSzzzz") |>
+            x ->
+                astimezone(x, tz"Pacific/Auckland") |>
+                x -> Dates.format(x, "yyyy-mm-ddTHH:MM:SS")
+        )
     )
-    resp2 = String(resp1.body) |> JSON.Parser.parse
-    resp3 = get(resp2, "results", "missing")
-    dusk_utc = get(resp3, "sunset", "missing")
-    dusk_utc_zoned = ZonedDateTime(dusk_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
-    dusk_local = astimezone(dusk_utc_zoned, tz"Pacific/Auckland")
-    dusk_string = Dates.format(dusk_local, "yyyy-mm-ddTHH:MM:SS")
-    dawn_utc = get(resp3, "sunrise", "missing")
-    dawn_utc_zoned = ZonedDateTime(dawn_utc, "yyyy-mm-ddTHH:MM:SSzzzz")
-    dawn_local = astimezone(dawn_utc_zoned, tz"Pacific/Auckland")
-    dawn_string = Dates.format(dawn_local, "yyyy-mm-ddTHH:MM:SS")
-    date = Dates.format(dt, "yyyy-mm-dd")
-    return (date, dawn_string, dusk_string)
+    @transform!(
+        df,
+        @byrow :Dusk =
+            ZonedDateTime((:sunset |> String), "yyyy-mm-ddTHH:MM:SSzzzz") |>
+            x ->
+                astimezone(x, tz"Pacific/Auckland") |>
+                x -> Dates.format(x, "yyyy-mm-ddTHH:MM:SS")
+    )
+    select!(df, :day => :Date, :Dawn, :Dusk)
+    CSV.write("dawn_dusk.csv", df)
 end
 
 #use  this function to get a date range of data, saves to csv in cwd and  returns df  
-function twilight_tuple_local_time(dr::StepRange{Date,Day})
+function get_sunrise_sunset_utc(dr::StepRange{Date,Day})
     # C05 co-ordinates hard coded into function
     cols = [
         "day",
@@ -129,19 +129,21 @@ function twilight_tuple_local_time(dr::StepRange{Date,Day})
         "civil_twilight_begin",
         "nautical_twilight_end",
     ]
-    df = DataFrame([name => [] for name in cols])
+    df = DataFrames.DataFrame([name => [] for name in cols])
     for day in dr
         resp =
             HTTP.get(
                 "https://api.sunrise-sunset.org/json?lat=-45.50608&lng=167.47822&date=$day&formatted=0",
             ) |>
-            x -> String(x.body) |> JSON.Parser.parse |> x -> get(x, "results", "missing")
-        resp["day"] = string(day)
-        push!(df, resp)
+            #x -> String(x.body) |> JSON.Parser.parse |> x -> get(x, "results", "missing")
+            x -> String(x.body) |> x -> JSON3.read(x) |> x -> get(x, "results", "missing")
+        data = copy(resp)
+        data[:day] = string(day)
+        push!(df, data)
         print("$day  ")
         sleep(3)
     end
-    CSV.write("sunrise_sunset.csv", df)
+    CSV.write("sunrise_sunset_utc.csv", df)
     return df
 end
 
@@ -211,11 +213,11 @@ Takes a list of moth files and rewrites UTC filenames to NZDT, because since
 reconfiguring my moths at start of daylight saving they are recording UTC
 filenames which is not consistent with the way my notebook works.
 
-a = glob("*/2022-12-17/")
+a = Glob.glob("*/2022-12-17/")
 for folder in a
 cd(folder)
 println(folder)
-files = glob("*.WAV")
+files = Glob.glob("*.WAV")
 utc_to_nzdt!files)
 cd("/media/david/Pomona-2")
 end
@@ -257,3 +259,83 @@ function utc_to_nzdt!(files::Vector{String})
     end
     print("Tidy\n")
 end
+
+function resample_to_16000hz(signal, freq)
+    signal = DSP.resample(signal, 16000.0f0 / freq; dims = 1)
+    freq = 16000
+    return signal, freq
+end
+
+function resample_to_8000hz(signal, freq)
+    signal = DSP.resample(signal, 8000.0f0 / freq; dims = 1)
+    freq = 8000
+    return signal, freq
+end
+
+# Convert mp3's with: for file in *.mp3; do ffmpeg -i "${file}" -ar 16000 "${file%.*}.wav"; done
+# Requires 16000hz wav's, works in current folder, need ffmpeg to convert mp3's to wavs at 16000hz
+#= 
+wavs = Glob.glob("*.wav")
+for wav in wavs
+    Skraak.make_spectro_from_file(wav)
+end
+=#
+function make_spectro_from_file(file::String)
+    signal, freq = WAV.wavread("$file")
+    freq = freq |> Float32
+    partitioned_signal = Iterators.partition(signal, 80000) #5s clips
+
+    for (index, part) in enumerate(partitioned_signal)
+        length(part) > 50000 && begin
+            outfile = "$(chop(file, head=0, tail=4))__$(index)"
+            image = Skraak.get_image_from_sample(part, freq)
+            PNGFiles.save("$outfile.png", image)
+        end
+    end
+end
+
+# get the size in GB of a trip worth of data
+list = glob("Pomona/*/2024-06-23/*")
+#list=glob("*/2024-10-18/*")
+function trip_filesize(list::String)
+    x = []
+    for item in list
+        y = filesize(item)
+        push!(x, y)
+    end
+    return sum(x) / 1000000000
+end
+
+#= Dont use, was the start of function below, useful as explanation
+a=glob("Pomona/*/2022-10-08/")
+for folder in a
+    f=replace(folder, "2022-10-08/" => "2022-10-08")
+    d=replace(folder, "2022-10-08/" => "")
+    println("rsync -avzr $f /media/david/Pomona-1/$d")
+    run(`rsync -avzr $f /media/david/Pomona-1/$d`)
+end
+=#
+
+#=for copying over a trip worth of data from 1 Pomona drive to another
+a1=glob("Pomona/*/2023-12-25/")
+a2=glob("Pomona/*/2024-05-05/")
+a3=glob("Pomona/*/2024-06-23/")
+d=[a1;a2;a3]
+
+copy_over(d, "Pomona-3")
+=#
+function copy_over(list::Vector{String}, dst::String)
+    for folder in list
+        folder_name::String = split(folder, "/")[end-1]
+        f = replace(folder, "$folder_name/" => "$folder_name")
+        d = replace(folder, "$folder_name/" => "")
+        println("rsync -avzr $f /media/david/$dst/$d")
+        run(`rsync -avzr $f /media/david/$dst/$d`)
+    end
+end
+
+# delete originating files
+##### BE CAREFUL
+#for folder in d
+# rm(folder, recursive=true)
+#end

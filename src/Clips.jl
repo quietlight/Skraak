@@ -1,51 +1,26 @@
 # Clips.jl
 
-export make_clips, move_clips_to_folders
+export make_clips, make_clips_generic, move_clips_to_folders
 
->>>>>>> 1 [AQWXGGE3 mod to clips.jl]
 using CSV,
     DataFrames,
+    DataFramesMeta,
     Dates,
     DSP,
     Glob,
-    JSON,
+    ImageTransformations,
     PerceptualColourMaps,
+    PNGFiles,
     Random,
     TimeZones,
-    WAV,
-    PNGFiles,
-    Images
-======= 1 [MMG2PLXK new functiion to make clips of downloaded bisd calls]
-using CSV,
-    DataFrames,
-    Dates,
-    DSP,
-    Glob,
-    JSON,
-    PerceptualColourMaps,
-    Random,
-    TimeZones,
-    WAV,
-    PNGFiles,
-    Images
-<<<<<<< 1
-using DataFramesMeta #: @transform!, @subset!, @byrow, @passmissing
+    WAV
 
-"""
-make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
+#using DataFramesMeta : @transform!, @subset!, @byrow, @passmissing
 
-This function takes a preds.csv files and generates
-file names, wav's, spectrograms etc to be reviewed.
-it calls night() and may call construct_dawn_dusk_dict() unless the dict is globally defined and passed in
-
-It should be run from Pomona-1/, Pomona-2/ or Pomona-3/, assumes it is, it uses the path
-It saves  wav and png files to current working directory, ie Pomona-3
-need to use a try/catch because the 2 assert functions thow an error to short circuit the function
-
+#= something here causes a problem with Dates when enclosed by """
 using Glob, Skraak
-predictions = glob("*/2023-09-11*/preds*")
-predictions = glob("path/to/preds*")
-for file in predictions #[1:6][7:12][13:18][19:24]
+predictions = Glob.glob("*/2024-10-18/preds*")
+for file in predictions
 try
 make_clips(file)
 catch x
@@ -60,11 +35,22 @@ file,start_time,end_time,label
 file,start_time,end_time,absent,present
 
 using Glob, CSV, DataFrames, DataFramesMeta, Dates, DSP, Plots, Random, WAV
-"""
 
 # Assumes run on linux
 # Assumes function run from Pomona-1 or Pomona-2
 #dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv",),
+=#
+"""
+make_clips(preds_path::String, dawn_dusk_dict::Dict{Dates.Date, Tuple{Dates.DateTime, Dates.DateTime}} = construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv"))
+
+This function takes a preds.csv files and generates
+file names, wav's, spectrograms etc to be reviewed.
+it calls night() and may call construct_dawn_dusk_dict() unless the dict is globally defined and passed in
+
+It should be run from Pomona-1/, Pomona-2/ or Pomona-3/, assumes it is, it uses the path
+It saves  wav and png files to current working directory, ie Pomona-3
+need to use a try/catch because the 2 assert functions thow an error to short circuit the function
+"""
 function make_clips(
     preds_path::String,
     label::Int = 1,
@@ -78,26 +64,27 @@ function make_clips(
     # Load and group data frame by file
     gdf =
         #! format: off
-        DataFrame(CSV.File(preds_path)) |>
-        x -> assert_not_empty(x, preds_path) |>
-        x -> rename_column!(x, "1.0", "label") |> #can remove now, needs to be label
-        x -> assert_detections_present(x, label, location, trip_date) |>
-        x -> filter_positives!(x, label) |>
+        DataFrames.DataFrame(CSV.File(preds_path)) |>
+        x -> Skraak.assert_not_empty(x, preds_path) |>
+        x -> Skraak.rename_column!(x, "1.0", "label") |> #can remove now, for old opensounscape model needs to be label
+        x -> rename_column!(x, "Kiwi", "label") |> #for new model Kiwi needs to read as label
+        x -> Skraak.assert_detections_present(x, label, location, trip_date) |>
+        x -> Skraak.filter_positives!(x, label) |>
         insert_datetime_column! |>
-        x -> night_or_day!(x, dawn_dusk_dict, night) |> #true=night, false=day
+        x -> Skraak.night_or_day!(x, dawn_dusk_dict, night) |> #true=night, false=day
         group_by_file!
         #! format: on
     # Make clip and spectrogram
     for (k, v) in pairs(gdf)
         #file_name = chop(v.file[1], head = 2, tail = 4)
-        file_name, extension = path_to_file_string(v.file[1])
+        file_name, extension = Skraak.path_to_file_string(v.file[1])
         start_times = v[!, :start_time] |> sort
 
-        detections = cluster_detections(start_times)
+        detections = Skraak.cluster_detections(start_times)
         isempty(detections) && continue
 
-        signal, freq = wavread("$location/$trip_date/$(file_name).$(extension)")
-        ##signal, freq = wavread("$location/$h/$trip_date/$(file_name).$(extension)")
+        signal, freq = WAV.wavread("$location/$trip_date/$(file_name).$(extension)")
+        ##signal, freq = WAV.wavread("$location/$h/$trip_date/$(file_name).$(extension)")
         if freq > 16000
             signal, freq = Skraak.resample_to_16000hz(signal, freq)
         end
@@ -105,7 +92,7 @@ function make_clips(
         length_signal = length(signal)
 
         for detection in detections
-            st, en = calculate_clip_start_end(detection, freq, length_signal)
+            st, en = Skraak.calculate_clip_start_end(detection, freq, length_signal)
             name = "$location-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
             ##name = "$location-$h-$trip_date-$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
             f = "Clips_$(today())"
@@ -113,11 +100,11 @@ function make_clips(
             outfile = "$f/$name"
 
             sample = signal[Int(st):Int(en)]
-            wavwrite(sample, "$outfile.wav", Fs = Int(freq))
+            WAV.wavwrite(sample, "$outfile.wav", Fs = Int(freq))
 
             #plot = plot_spectrogram(sample, freq)
             #savefig(plot, "$outfile.png")
-            image = get_image_from_sample(sample, freq)
+            image = Skraak.get_image_from_sample(sample, freq)
             PNGFiles.save("$outfile.png", image)
             #PNGFiles.save("/media/david/SSD1/$outfile.png", image)
         end
@@ -165,7 +152,7 @@ end
 
 function filename_to_datetime!(file)::DateTime
     #file_string = chop(file, head = 2, tail = 4)
-    file_string = path_to_file_string(file) |> first
+    file_string = Skraak.path_to_file_string(file) |> first
     date_time =
         length(file_string) > 13 ? DateTime(file_string, dateformat"yyyymmdd_HHMMSS") :
         DateTime(
@@ -176,7 +163,7 @@ function filename_to_datetime!(file)::DateTime
 end
 
 function insert_datetime_column!(df::DataFrame)::DataFrame
-    @transform!(df, @byrow :DateTime = filename_to_datetime!(String(:file)))
+    @transform!(df, @byrow :DateTime = Skraak.filename_to_datetime!(String(:file)))
     return df
 end
 
@@ -186,13 +173,13 @@ function night_or_day!(
     dawn_dusk_dict::Dict{Dates.Date,Tuple{Dates.DateTime,Dates.DateTime}},
     night_time::Bool = true,
 )::DataFrame
-    night_time ? @subset!(df, @byrow night(:DateTime, dawn_dusk_dict)) :
+    night_time ? @subset!(df, @byrow Skraak.night(:DateTime, dawn_dusk_dict)) :
     @subset!(df, @byrow !night(:DateTime, dawn_dusk_dict))
     return df
 end
 
 function group_by_file!(df::DataFrame)
-    gdf = groupby(df, :file)
+    gdf = DataFrames.groupby(df, :file)
     return gdf
 end
 
@@ -238,31 +225,43 @@ function get_image_from_sample(sample, f) #sample::Vector{Float64}
         x -> x .+ abs(minimum(x)) |>
         x -> x ./ maximum(x) |>
         x -> reverse(x, dims = 1) |>
-        x -> applycolourmap(x, cmap("L4")) |>
+        x -> PerceptualColourMaps.applycolourmap(x, cmap("L4")) |>
         #x -> RGB.(x) |> 
-        x -> imresize(x, 224, 224) |>
+        x -> ImageTransformations.imresize(x, 224, 224) |>
         x -> Float32.(x)
         #! format: on
     return image
 end
 
-"""
-construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
-sun = DataFrame(CSV.File(file))
-
-Takes dawn dusk.csv and returns a dict to be consumeed by night().
-~/dawn_dusk.csv
-At present it goes from the start of 2019 to the end of 2024
-The csv contains local time sunrise and sunset
-I use this to decide if a file with a local time encoded name was recorded at night
-
+#=
 dict = construct_dawn_dusk_dict("/Volumes/SSD1/dawn_dusk.csv")
-dict = Utility.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+
+df=DataFrames.DataFrame(dict)
+df=CSV.File("dawn_dusk.csv") |> DataFrame
+open("dict.jl", "w") do file
+    write(file, "const dddict = Dict(")
+    for row in eachrow(df)
+        line="\tDates.Date(\"$(row.Date)\") =>
+            (Dates.DateTime(\"$(row.Dawn)\"), Dates.DateTime(\"$(row.Dusk)\")),\n"
+        write(file, line)
+    end
+    write(file, ")")
+end
 
 using CSV, DataFrames
+=#
+"""
+construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
+sun = DataFrames.DataFrame(CSV.File(file))
+
+Takes dawn_dusk.csv and returns a dict to be consumed by night().
+~/dawn_dusk.csv
+At present it goes from the start of 2019 to the end of 2026
+The csv contains local time sunrise and sunset
+I use this to decide if a file with a local time encoded name was recorded at nigh
 """
 function construct_dawn_dusk_dict(file::String)::Dict{Date,Tuple{DateTime,DateTime}}
-    sun = DataFrame(CSV.File(file))
+    sun = DataFrames.DataFrame(CSV.File(file))
     x = Tuple(zip(sun.Dawn, sun.Dusk))
     y = Dict(zip(sun.Date, x))
     return y
@@ -272,7 +271,7 @@ end
 night(call_time::DateTime, dict::Dict{Date, Tuple{DateTime, DateTime}})::Bool
 
 Returns true if time is at night, ie between civil twilights, dusk to dawn.
-Consumes dict from construct_dawn_dusk_dict
+Consumes dict from dawn_dusk_dict.jl (or construct_dawn_dusk_dict)
 
 time=DateTime("2021-11-02T21:14:35",dateformat"yyyy-mm-ddTHH:MM:SS")
 Utility.night(time, dict)
@@ -300,8 +299,8 @@ file must be list of png images, assumes wav's are there too
 will move mp4's from video folder if they are present
 """
 function move_clips_to_folders(df::DataFrame)
-    p = glob("*.png")
-    w = glob("*.[W,w][A,a][V,v]")
+    p = Glob.glob("*.png")
+    w = Glob.glob("*.[W,w][A,a][V,v]")
     @assert (first(df.file) |> x -> split(x, ".")[end] |> x -> x == "png") "df.file must be a list of png's"
     @assert issetequal(df.file, p) "All png files in dataframe must be present in folder"
     @assert issetequal(chop.(df.file, head = 0, tail = 4), chop.(w, head = 0, tail = 4)) "There must be a wav for every png in the dataframe"
@@ -326,50 +325,124 @@ function move_clips_to_folders(df::DataFrame)
     end
 end
 
-# Convert mp3's with: for file in *.mp3; do ffmpeg -i "${file}" -ar 16000 "${file%.*}.wav"; done
-# Requires 16000hz wav's, works in current folder, need ffmpeg to convert mp3's to wavs at 16000hz
-#= 
-wavs = glob("*.wav")
-for wav in wavs
-    Skraak.make_spectro_from_file(wav)
+#=
+using Glob, Skraak, CSV, DataFrames, Dates, PNGFiles
+
+predictions = glob("*/*/preds-2024-10-21.csv")
+
+For Kahurangi (1) Data
+a=glob("Manu*/['m','X']*/*/preds_Kahurangi_1-2_ST_2024-10-29.csv")
+b=glob("Manu*/['m','X']*/*/*/preds_Kahurangi_1-2_ST_2024-10-29.csv")
+c=glob("Manu*/['m','X']*/*/*/*/preds_Kahurangi_1-2_ST_2024-10-29.csv")
+predictions = [a ; b ; c]
+
+a=glob("Manu*/['m','X']*/*/preds4_Kahurangi_1-2_2024-10-29.csv")
+b=glob("Manu*/['m','X']*/*/*/preds4_Kahurangi_1-2_2024-10-29.csv")
+c=glob("Manu*/['m','X']*/*/*/*/preds4_Kahurangi_1-2_2024-10-29.csv")
+predictions = [a ; b ; c]
+
+a=glob("Manu*/['m','X']*/*/preds3_Kahurangi_1-2_2024-10-29.csv")
+b=glob("Manu*/['m','X']*/*/*/preds3_Kahurangi_1-2_2024-10-29.csv")
+c=glob("Manu*/['m','X']*/*/*/*/preds3_Kahurangi_1-2_2024-10-29.csv")
+predictions = [a ; b ; c]
+
+For Kahurangi (2) Data
+predictions=glob("Manu*/m*/preds_Kahurangi_1-2_ST_2024-10-29.csv")
+predictions=glob("Manu*/m*/preds4_Kahurangi_1-2_2024-10-29.csv")
+predictions=glob("Manu*/m*/preds3_Kahurangi_1-2_2024-10-29.csv")
+
+For Cobb
+predictions=glob("Friends*/preds_Kahurangi_1-2_ST_2024-10-29.csv")
+predictions=glob("Friends*/preds4_Kahurangi_1-2_2024-10-29.csv")
+predictions=glob("Friends*/preds3_Kahurangi_1-2_2024-10-29.csv")
+
+Flora
+a=glob("*/*/preds_Kahurangi_1-2_ST_2024-10-31.csv")
+b=glob("*/*/*/preds_Kahurangi_1-2_ST_2024-10-31.csv")
+c=glob("*/*/*/*/preds_Kahurangi_1-2_ST_2024-10-31.csv")
+predictions=[a;b;c]
+
+# to delete empty preds.csv files, should be ok now with improved python script
+for file in list
+    size = stat(file).size
+    if size < 10
+        println("Deleting $file - $size")
+        rm(file)
+    end
+end
+
+for file in predictions
+try
+make_clips_generic(file, 1, Flora1_K1-2-ST, false)
+catch x
+println(x)
+end
 end
 =#
-function make_spectro_from_file(file::String)
-    signal, freq = wavread("$file")
-    freq = freq |> Float32
-    partitioned_signal = Iterators.partition(signal, 80000) #5s clips
+function make_clips_generic(
+    preds_path::String,
+    label::Int, ##= 1, needs looking at here TODO
+    id::String,
+    unique_file_names = true,
+)
+    # Assumes function run from Kahurangi Data
+    #pth = replace(preds_path, "preds-2024-10-21.csv" => "")
+    pth = split(preds_path, "/") |> x -> joinpath(x[1:end-1]) |> x -> x * "/"
 
-    for (index, part) in enumerate(partitioned_signal)
-        length(part) > 50000 && begin
-            outfile = "$(chop(file, head=0, tail=4))__$(index)"
-            image = get_image_from_sample(part, freq)
+    function assert_detections_present_(df::DataFrame, label::Int, preds_path)::DataFrame
+        label in levels(df.label) ? (return df) :
+        @error "No detections for label = $label at $preds_path"
+    end
+
+    # Load and group data frame by file
+    gdf =
+        #! format: off
+        DataFrames.DataFrame(CSV.File(preds_path)) |>
+        x -> Skraak.assert_not_empty(x, preds_path) |>
+        x -> Skraak.rename_column!(x, "1.0", "label") |> #can remove now, for old opensoundscape kiwi model needs to be label
+        x -> Skraak.rename_column!(x, "Kiwi", "label") |> #for new kiwi model needs to be label
+        x -> assert_detections_present_(x, label, preds_path) |>
+        x -> Skraak.filter_positives!(x, label) |>
+        Skraak.group_by_file!
+        #! format: on
+    # Make clip and spectrogram
+    for (k, v) in pairs(gdf)
+        #file_name = chop(v.file[1], head = 2, tail = 4)
+        file_name, extension = Skraak.path_to_file_string(v.file[1])
+        start_times =
+            v[!, :start_time] |> x ->
+                dropmissing(x, disallowmissing = true) |> ######CHECK used to make cobb work
+                sort
+
+        detections = Skraak.cluster_detections(start_times)
+        isempty(detections) && continue
+
+        signal, freq = WAV.wavread("$pth$(file_name).$(extension)")
+        if freq > 16000
+            signal, freq = Skraak.resample_to_8000hz(signal, freq)
+        end
+        freq = freq |> Float32
+        length_signal = length(signal)
+
+        for detection in detections
+            st, en = Skraak.calculate_clip_start_end(detection, freq, length_signal)
+            if unique_file_names == true
+                name = "$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))" #leave off path, not necesaray if unique file names
+            else
+                p = replace(pth, "/" => "--") #replace / with -- including trailing /
+                name = "$p$file_name-$(Int(floor(st/freq)))-$(Int(ceil(en/freq)))"
+            end
+            f = "Clips_$id_$(today())"
+            mkpath(f)
+            outfile = "$f/$name"
+
+            sample = signal[Int(st):Int(en)]
+            Skraak.WAV.wavwrite(sample, "$outfile.wav", Fs = Int(freq))
+
+            image = Skraak.get_image_from_sample(sample, freq)
             PNGFiles.save("$outfile.png", image)
         end
+        print(".")
     end
+    print(".")
 end
-
-#=
-For making colour images using GLMakie (moved on but may be useful one day), not wired up into skraak yet.
-Using for 24/7 and 250kHZ data.
-
-using DSP, GLMakie, PNGFiles
-function get_colour_image_from_sample(sample, f)
-    dims = 224 #px
-    S = DSP.spectrogram(sample[:, 1], 400, 2; fs = f)
-    f = GLMakie.Figure(resolution = (dims, dims), figure_padding = 0)
-    ax = GLMakie.Axis(f[1, 1], spinewidth = 0)
-    GLMakie.hidedecorations!(ax)
-    GLMakie.heatmap!(ax, (DSP.pow2db.(S.power))', colormap = :inferno)
-
-    @assert size(f) == (dims, dims) "Wrong size"
-    return f
-end
-
-function save_colour_image(f, outfile)
-    try
-        PNGFiles.save("$outfile.png", f)
-    catch err
-        @info "Saving $outfile.png failed\n$err"
-    end
-end
-=#

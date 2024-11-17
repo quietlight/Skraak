@@ -6,27 +6,26 @@ using DataFrames, Dates, Glob, Random, SHA, TimeZones, WAV, XMLDict
 #DelimitedFiles, DuckDB, JSON3
 
 #=
+# needs SSD1 present for dawn_dusk.csv (not anymore, gets from dddict)
 used like:
 using Glob, Skraak, CSV
-folders=glob("*/2024-06-23/")
-for folder in folders[2:end]
+folders=Glob.glob("*/2024-10-18/")
+for folder in folders[3:end]
 cd(folder)
     try
         df = Skraak.file_metadata_to_df()
-        CSV.write("/media/david/SSD3/New/pomona_files_20240627.csv", df; append=true)
-    catch
-        @warn "error with $folder"
+        CSV.write("/media/david/Pomona-4/Pomona-4/pomona_files_20241018.csv", df; append=true)
+    catch x
+        @warn "$x error with $folder"
     end
-cd("/media/david/SSD3/New/")
+cd("/media/david/Pomona-4/Pomona-4/")
 end
-
-Then go into sublime and change drive New to Pomona-4
 
 Then using duckdb cli from SSD:
 duckdb AudioData.duckdb
 show tables;
 SELECT * FROM pomona_files;
-COPY pomona_files FROM '/media/david/Pomona-3/Pomona-3/pomona_files_20231019.csv';
+COPY pomona_files FROM '/media/david/Pomona-3/Pomona-3/pomona_files_20241018.csv';
 SELECT * FROM pomona_files;
 
 Then backup with:
@@ -36,6 +35,11 @@ Then quit and backup using cp on the db file
 
 Then rsync ssd to usb
 rsync -avzr  --delete /media/david/SSD1/ /media/david/USB/
+
+To restore from backup:
+duckdb my_database.duckdb
+IMPORT DATABASE 'AudioDataBackup_2024-07-10';
+
 =#
 
 """
@@ -48,7 +52,7 @@ This function needs /media/david/SSD1/dawn_dusk.csv
 """
 function file_metadata_to_df()
     # Initialise dataframe with columns: disk, location, trip_date, file, lattitude, longitude, start_recording_period_localt, finish_recording_period_localt, duration, sample_rate, zdt, ldt, moth_id, gain, battery, temperature
-    df = DataFrame(
+    df = DataFrames.DataFrame(
         disk = String[],
         location = String[],
         trip_date = String[],
@@ -70,7 +74,7 @@ function file_metadata_to_df()
     )
 
     #Get WAV list for folder
-    wav_list = glob("*.WAV") |> sort
+    wav_list = Glob.glob("*.WAV") |> sort
 
     #Return empty df if nothing in the folder
     if length(wav_list) == 0
@@ -85,7 +89,7 @@ function file_metadata_to_df()
     trip_date = raw_path_vec[3]
 
     #Get location, assumes 1 gpx is in the follder
-    waypoint = glob("*.gpx")
+    waypoint = Glob.glob("*.gpx")
     length(waypoint) != 1 && @error "no gpx file in $trip_date $location"
     loc = read(waypoint[1], String) |> xml_dict
 
@@ -93,7 +97,7 @@ function file_metadata_to_df()
     longitude = parse(Float64, (loc["gpx"]["wpt"][:lon]))
 
     #Start of recording period
-    _, _, _, binary_metadata_start = wavread(wav_list[1])
+    _, _, _, binary_metadata_start = WAV.wavread(wav_list[1])
     c_v_s = split(wav_info_read(binary_metadata_start)[:ICMT], " ")
     comment_vector_start = length(c_v_s) < 22 ? c_v_s : c_v_s[1:19]
     date_start = split(comment_vector_start[4], "/")
@@ -121,7 +125,7 @@ function file_metadata_to_df()
         Dates.format(astimezone(zdt1, tz"Pacific/Auckland"), "yyyy-mm-dd HH:MM:SSzzzz")
 
     #End of recording period
-    _, _, _, binary_metadata_end = wavread(wav_list[end])
+    _, _, _, binary_metadata_end = WAV.wavread(wav_list[end])
     c_v_e = split(wav_info_read(binary_metadata_end)[:ICMT], " ")
     comment_vector_end = length(c_v_e) < 22 ? c_v_e : c_v_e[1:19]
     date_end = split(comment_vector_end[4], "/")
@@ -148,7 +152,8 @@ function file_metadata_to_df()
     finish_recording_period_localt =
         Dates.format(astimezone(zdt2, tz"Pacific/Auckland"), "yyyy-mm-dd HH:MM:SSzzzz")
 
-    dict = Skraak.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+    #dict = Skraak.construct_dawn_dusk_dict("/media/david/SSD1/dawn_dusk.csv")
+    dict = dddict
 
     #So I know what it is doing
     println(raw_path_vec)
@@ -157,7 +162,7 @@ function file_metadata_to_df()
     for file in wav_list
         #print(file)
         try
-            audio_data, sample_rate, _, binary_metadata = wavread(file)
+            audio_data, sample_rate, _, binary_metadata = WAV.wavread(file)
             c_v = split(wav_info_read(binary_metadata)[:ICMT], " ")
             comment_vector = length(c_v) < 22 ? c_v : c_v[1:19]
 
