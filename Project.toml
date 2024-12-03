@@ -25,6 +25,9 @@ TimeZones = "f269a46b-ccf7-5d73-abea-4c690281aa53"
 WAV = "8149f6b0-98f6-5db9-b78f-408fbbb8ef88"
 XMLDict = "228000da-037f-5747-90a9-8195ccbf91a5"
 
+[compat]
+JuliaFormatter = "1"
+
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
